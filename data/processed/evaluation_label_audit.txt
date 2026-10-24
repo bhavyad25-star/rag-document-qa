@@ -1,0 +1,3091 @@
+==========================================================================================
+QUESTION 1: How does Dense Passage Retrieval represent and retrieve passages?
+EXPECTED SOURCE: 2020.emnlp-main.550.txt
+EXPECTED PDF PAGES: [2]
+----------------------------------------------------------------------
+PDF PAGE 2
+6770
+QA datasets, it also suffers from two weaknesses.
+First, ICT pretraining is computationally intensive
+and it is not completely clear that regular sentences
+are good surrogates of questions in the objective
+function. Second, because the context encoder is
+not ﬁne-tuned using pairs of questions and answers,
+the corresponding representations could be subop-
+timal.
+In this paper, we address the question: can we
+train a better dense embedding model using only
+pairs of questions and passages (or answers), with-
+out additional pretraining? By leveraging the now
+standard BERT pretrained model (Devlin et al.,
+2019) and a dual-encoder architecture (Bromley
+et al., 1994), we focus on developing the right
+training scheme using a relatively small number
+of question and passage pairs. Through a series
+of careful ablation studies, our ﬁnal solution is
+surprisingly simple: the embedding is optimized
+for maximizing inner products of the question and
+relevant passage vectors, with an objective compar-
+ing all pairs of questions and passages in a batch.
+Our Dense Passage Retriever (DPR) is exception-
+ally strong. It not only outperforms BM25 by a
+large margin (65.2% vs. 42.9% in Top-5 accuracy),
+but also results in a substantial improvement on
+the end-to-end QA accuracy compared to ORQA
+(41.5% vs. 33.3%) in the open Natural Questions
+setting (Lee et al., 2019; Kwiatkowski et al., 2019).
+Our contributions are twofold. First, we demon-
+strate that with the proper training setup, sim-
+ply ﬁne-tuning the question and passage encoders
+on existing question-passage pairs is sufﬁcient to
+greatly outperform BM25. Our empirical results
+also suggest that additional pretraining may not be
+needed. Second, we verify that, in the context of
+open-domain question answering, a higher retrieval
+precision indeed translates to a higher end-to-end
+QA accuracy. By applying a modern reader model
+to the top retrieved passages, we achieve compara-
+ble or better results on multiple QA datasets in the
+open-retrieval setting, compared to several, much
+complicated systems.
+2
+Background
+The problem of open-domain QA studied in this
+paper can be described as follows. Given a factoid
+question, such as “Who ﬁrst voiced Meg on Family
+Guy?” or “Where was the 8th Dalai Lama born?”, a
+system is required to answer it using a large corpus
+of diversiﬁed topics. More speciﬁcally, we assume
+the extractive QA setting, in which the answer is
+restricted to a span appearing in one or more pas-
+sages in the corpus. A
+==========================================================================================
+QUESTION 2: What is retrieval-augmented generation, and why is it useful?
+EXPECTED SOURCE: 2005.11401v4.txt
+EXPECTED PDF PAGES: [1, 2]
+----------------------------------------------------------------------
+PDF PAGE 1
+Retrieval-Augmented Generation for
+Knowledge-Intensive NLP Tasks
+Patrick Lewis†‡, Ethan Perez⋆,
+Aleksandra Piktus†, Fabio Petroni†, Vladimir Karpukhin†, Naman Goyal†, Heinrich Küttler†,
+Mike Lewis†, Wen-tau Yih†, Tim Rocktäschel†‡, Sebastian Riedel†‡, Douwe Kiela†
+†Facebook AI Research; ‡University College London; ⋆New York University;
+plewis@fb.com
+Abstract
+Large pre-trained language models have been shown to store factual knowledge
+in their parameters, and achieve state-of-the-art results when ﬁne-tuned on down-
+stream NLP tasks. However, their ability to access and precisely manipulate knowl-
+edge is still limited, and hence on knowledge-intensive tasks, their performance
+lags behind task-speciﬁc architectures. Additionally, providing provenance for their
+decisions and updating their world knowledge remain open research problems. Pre-
+trained models with a differentiable access mechanism to explicit non-parametric
+memory have so far been only investigated for extractive downstream tasks. We
+explore a general-purpose ﬁne-tuning recipe for retrieval-augmented generation
+(RAG) — models which combine pre-trained parametric and non-parametric mem-
+ory for language generation. We introduce RAG models where the parametric
+memory is a pre-trained seq2seq model and the non-parametric memory is a dense
+vector index of Wikipedia, accessed with a pre-trained neural retriever. We com-
+pare two RAG formulations, one which conditions on the same retrieved passages
+across the whole generated sequence, and another which can use different passages
+per token. We ﬁne-tune and evaluate our models on a wide range of knowledge-
+intensive NLP tasks and set the state of the art on three open domain QA tasks,
+outperforming parametric seq2seq models and task-speciﬁc retrieve-and-extract
+architectures. For language generation tasks, we ﬁnd that RAG models generate
+more speciﬁc, diverse and factual language than a state-of-the-art parametric-only
+seq2seq baseline.
+1
+Introduction
+Pre-trained neural language models have been shown to learn a substantial amount of in-depth knowl-
+edge from data [47]. They can do so without any access to an external memory, as a parameterized
+implicit knowledge base [51, 52]. While this development is exciting, such models do have down-
+sides: They cannot easily expand or revise their memory, can’t straightforwardly provide insight into
+their predictions, and may produce “hallucinations” [38]. Hybrid models that combine parametric
+memory with non-param
+----------------------------------------------------------------------
+PDF PAGE 2
+The Divine
+Comedy (x)
+q
+Query
+Encoder
+q(x)
+MIPS
+pθ
+Generator pθ
+(Parametric)
+Margin-
+alize
+This 14th century work
+is divided into 3
+sections: "Inferno",
+"Purgatorio" &
+"Paradiso"         (y)
+End-to-End Backprop through q and pθ
+Barack Obama was
+born in Hawaii.(x)
+Fact Veriﬁcation: Fact Query
+supports (y)
+Question Generation
+Fact Veriﬁcation:
+Label Generation
+Document
+Index
+Define "middle ear"(x)
+Question Answering:
+Question Query
+The middle ear includes
+the tympanic cavity and
+the three ossicles.  (y)
+Question Answering:
+Answer Generation
+Retriever pη
+(Non-Parametric)
+z4
+z3
+z2
+z1
+d(z)
+Jeopardy Question
+Generation:
+Answer Query
+Figure 1: Overview of our approach. We combine a pre-trained retriever (Query Encoder + Document
+Index) with a pre-trained seq2seq model (Generator) and ﬁne-tune end-to-end. For query x, we use
+Maximum Inner Product Search (MIPS) to ﬁnd the top-K documents zi. For ﬁnal prediction y, we
+treat z as a latent variable and marginalize over seq2seq predictions given different documents.
+but have only explored open-domain extractive question answering. Here, we bring hybrid parametric
+and non-parametric memory to the “workhorse of NLP,” i.e. sequence-to-sequence (seq2seq) models.
+We endow pre-trained, parametric-memory generation models with a non-parametric memory through
+a general-purpose ﬁne-tuning approach which we refer to as retrieval-augmented generation (RAG).
+We build RAG models where the parametric memory is a pre-trained seq2seq transformer, and the
+non-parametric memory is a dense vector index of Wikipedia, accessed with a pre-trained neural
+retriever. We combine these components in a probabilistic model trained end-to-end (Fig. 1). The
+retriever (Dense Passage Retriever [26], henceforth DPR) provides latent documents conditioned on
+the input, and the seq2seq model (BART [32]) then conditions on these latent documents together with
+the input to generate the output. We marginalize the latent documents with a top-K approximation,
+either on a per-output basis (assuming the same document is responsible for all tokens) or a per-token
+basis (where different documents are responsible for different tokens). Like T5 [51] or BART, RAG
+can be ﬁne-tuned on any seq2seq task, whereby both the generator and retriever are jointly learned.
+There has been extensive previous work proposing architectures to enrich systems with non-parametric
+memory which are trained from scratch for speciﬁc tasks, e.g. memory networks [64, 55], stack-
+augmented net
+==========================================================================================
+QUESTION 3: What problem does the Transformer architecture aim to solve?
+EXPECTED SOURCE: 1706.03762v7.txt
+EXPECTED PDF PAGES: [1]
+----------------------------------------------------------------------
+PDF PAGE 1
+Provided proper attribution is provided, Google hereby grants permission to
+reproduce the tables and figures in this paper solely for use in journalistic or
+scholarly works.
+Attention Is All You Need
+Ashish Vaswani∗
+Google Brain
+avaswani@google.com
+Noam Shazeer∗
+Google Brain
+noam@google.com
+Niki Parmar∗
+Google Research
+nikip@google.com
+Jakob Uszkoreit∗
+Google Research
+usz@google.com
+Llion Jones∗
+Google Research
+llion@google.com
+Aidan N. Gomez∗†
+University of Toronto
+aidan@cs.toronto.edu
+Łukasz Kaiser∗
+Google Brain
+lukaszkaiser@google.com
+Illia Polosukhin∗‡
+illia.polosukhin@gmail.com
+Abstract
+The dominant sequence transduction models are based on complex recurrent or
+convolutional neural networks that include an encoder and a decoder. The best
+performing models also connect the encoder and decoder through an attention
+mechanism. We propose a new simple network architecture, the Transformer,
+based solely on attention mechanisms, dispensing with recurrence and convolutions
+entirely. Experiments on two machine translation tasks show these models to
+be superior in quality while being more parallelizable and requiring significantly
+less time to train. Our model achieves 28.4 BLEU on the WMT 2014 English-
+to-German translation task, improving over the existing best results, including
+ensembles, by over 2 BLEU. On the WMT 2014 English-to-French translation task,
+our model establishes a new single-model state-of-the-art BLEU score of 41.8 after
+training for 3.5 days on eight GPUs, a small fraction of the training costs of the
+best models from the literature. We show that the Transformer generalizes well to
+other tasks by applying it successfully to English constituency parsing both with
+large and limited training data.
+∗Equal contribution. Listing order is random. Jakob proposed replacing RNNs with self-attention and started
+the effort to evaluate this idea. Ashish, with Illia, designed and implemented the first Transformer models and
+has been crucially involved in every aspect of this work. Noam proposed scaled dot-product attention, multi-head
+attention and the parameter-free position representation and became the other person involved in nearly every
+detail. Niki designed, implemented, tuned and evaluated countless model variants in our original codebase and
+tensor2tensor. Llion also experimented with novel model variants, was responsible for our initial codebase, and
+efficient inference and visualizations. Lukasz and Aidan spent countless long days designing va
+==========================================================================================
+QUESTION 4: Why does the Transformer use attention instead of relying entirely on recurrence or convolution?
+EXPECTED SOURCE: 1706.03762v7.txt
+EXPECTED PDF PAGES: [2]
+----------------------------------------------------------------------
+PDF PAGE 2
+1
+Introduction
+Recurrent neural networks, long short-term memory [13] and gated recurrent [7] neural networks
+in particular, have been firmly established as state of the art approaches in sequence modeling and
+transduction problems such as language modeling and machine translation [35, 2, 5]. Numerous
+efforts have since continued to push the boundaries of recurrent language models and encoder-decoder
+architectures [38, 24, 15].
+Recurrent models typically factor computation along the symbol positions of the input and output
+sequences. Aligning the positions to steps in computation time, they generate a sequence of hidden
+states ht, as a function of the previous hidden state ht−1 and the input for position t. This inherently
+sequential nature precludes parallelization within training examples, which becomes critical at longer
+sequence lengths, as memory constraints limit batching across examples. Recent work has achieved
+significant improvements in computational efficiency through factorization tricks [21] and conditional
+computation [32], while also improving model performance in case of the latter. The fundamental
+constraint of sequential computation, however, remains.
+Attention mechanisms have become an integral part of compelling sequence modeling and transduc-
+tion models in various tasks, allowing modeling of dependencies without regard to their distance in
+the input or output sequences [2, 19]. In all but a few cases [27], however, such attention mechanisms
+are used in conjunction with a recurrent network.
+In this work we propose the Transformer, a model architecture eschewing recurrence and instead
+relying entirely on an attention mechanism to draw global dependencies between input and output.
+The Transformer allows for significantly more parallelization and can reach a new state of the art in
+translation quality after being trained for as little as twelve hours on eight P100 GPUs.
+2
+Background
+The goal of reducing sequential computation also forms the foundation of the Extended Neural GPU
+[16], ByteNet [18] and ConvS2S [9], all of which use convolutional neural networks as basic building
+block, computing hidden representations in parallel for all input and output positions. In these models,
+the number of operations required to relate signals from two arbitrary input or output positions grows
+in the distance between positions, linearly for ConvS2S and logarithmically for ByteNet. This makes
+it more difficult to learn dependencies between distant posi
+==========================================================================================
+QUESTION 5: What are the roles of the query encoder and passage encoder in Dense Passage Retrieval?
+EXPECTED SOURCE: 2020.emnlp-main.550.txt
+EXPECTED PDF PAGES: [2]
+----------------------------------------------------------------------
+PDF PAGE 2
+6770
+QA datasets, it also suffers from two weaknesses.
+First, ICT pretraining is computationally intensive
+and it is not completely clear that regular sentences
+are good surrogates of questions in the objective
+function. Second, because the context encoder is
+not ﬁne-tuned using pairs of questions and answers,
+the corresponding representations could be subop-
+timal.
+In this paper, we address the question: can we
+train a better dense embedding model using only
+pairs of questions and passages (or answers), with-
+out additional pretraining? By leveraging the now
+standard BERT pretrained model (Devlin et al.,
+2019) and a dual-encoder architecture (Bromley
+et al., 1994), we focus on developing the right
+training scheme using a relatively small number
+of question and passage pairs. Through a series
+of careful ablation studies, our ﬁnal solution is
+surprisingly simple: the embedding is optimized
+for maximizing inner products of the question and
+relevant passage vectors, with an objective compar-
+ing all pairs of questions and passages in a batch.
+Our Dense Passage Retriever (DPR) is exception-
+ally strong. It not only outperforms BM25 by a
+large margin (65.2% vs. 42.9% in Top-5 accuracy),
+but also results in a substantial improvement on
+the end-to-end QA accuracy compared to ORQA
+(41.5% vs. 33.3%) in the open Natural Questions
+setting (Lee et al., 2019; Kwiatkowski et al., 2019).
+Our contributions are twofold. First, we demon-
+strate that with the proper training setup, sim-
+ply ﬁne-tuning the question and passage encoders
+on existing question-passage pairs is sufﬁcient to
+greatly outperform BM25. Our empirical results
+also suggest that additional pretraining may not be
+needed. Second, we verify that, in the context of
+open-domain question answering, a higher retrieval
+precision indeed translates to a higher end-to-end
+QA accuracy. By applying a modern reader model
+to the top retrieved passages, we achieve compara-
+ble or better results on multiple QA datasets in the
+open-retrieval setting, compared to several, much
+complicated systems.
+2
+Background
+The problem of open-domain QA studied in this
+paper can be described as follows. Given a factoid
+question, such as “Who ﬁrst voiced Meg on Family
+Guy?” or “Where was the 8th Dalai Lama born?”, a
+system is required to answer it using a large corpus
+of diversiﬁed topics. More speciﬁcally, we assume
+the extractive QA setting, in which the answer is
+restricted to a span appearing in one or more pas-
+sages in the corpus. A
+==========================================================================================
+QUESTION 6: How is a passage represented as a dense vector in Dense Passage Retrieval?
+EXPECTED SOURCE: 2020.emnlp-main.550.txt
+EXPECTED PDF PAGES: [1, 2]
+----------------------------------------------------------------------
+PDF PAGE 1
+Proceedings of the 2020 Conference on Empirical Methods in Natural Language Processing, pages 6769–6781,
+November 16–20, 2020. c⃝2020 Association for Computational Linguistics
+6769
+Dense Passage Retrieval for Open-Domain Question Answering
+Vladimir Karpukhin∗, Barlas O˘guz∗, Sewon Min†, Patrick Lewis,
+Ledell Wu, Sergey Edunov, Danqi Chen‡, Wen-tau Yih
+Facebook AI
+†University of Washington
+‡Princeton University
+{vladk, barlaso, plewis, ledell, edunov, scottyih}@fb.com
+sewon@cs.washington.edu
+danqic@cs.princeton.edu
+Abstract
+Open-domain question answering relies on ef-
+ﬁcient passage retrieval to select candidate
+contexts, where traditional sparse vector space
+models, such as TF-IDF or BM25, are the de
+facto method.
+In this work, we show that
+retrieval can be practically implemented us-
+ing dense representations alone, where em-
+beddings are learned from a small number
+of questions and passages by a simple dual-
+encoder framework.
+When evaluated on a
+wide range of open-domain QA datasets, our
+dense retriever outperforms a strong Lucene-
+BM25 system greatly by 9%-19% absolute in
+terms of top-20 passage retrieval accuracy, and
+helps our end-to-end QA system establish new
+state-of-the-art on multiple open-domain QA
+benchmarks.1
+1
+Introduction
+Open-domain question answering (QA) (Voorhees,
+1999) is a task that answers factoid questions us-
+ing a large collection of documents. While early
+QA systems are often complicated and consist of
+multiple components (Ferrucci (2012); Moldovan
+et al. (2003), inter alia), the advances of reading
+comprehension models suggest a much simpliﬁed
+two-stage framework: (1) a context retriever ﬁrst
+selects a small subset of passages where some
+of them contain the answer to the question, and
+then (2) a machine reader can thoroughly exam-
+ine the retrieved contexts and identify the correct
+answer (Chen et al., 2017). Although reducing
+open-domain QA to machine reading is a very rea-
+sonable strategy, a huge performance degradation
+is often observed in practice2, indicating the needs
+of improving retrieval.
+∗Equal contribution
+1The code and trained models have been released at
+https://github.com/facebookresearch/DPR.
+2For instance, the exact match score on SQuAD v1.1 drops
+from above 80% to less than 40% (Yang et al., 2019a).
+Retrieval in open-domain QA is usually imple-
+mented using TF-IDF or BM25 (Robertson and
+Zaragoza, 2009), which matches keywords efﬁ-
+ciently with an inverted index and can be seen
+as representing the question and c
+----------------------------------------------------------------------
+PDF PAGE 2
+6770
+QA datasets, it also suffers from two weaknesses.
+First, ICT pretraining is computationally intensive
+and it is not completely clear that regular sentences
+are good surrogates of questions in the objective
+function. Second, because the context encoder is
+not ﬁne-tuned using pairs of questions and answers,
+the corresponding representations could be subop-
+timal.
+In this paper, we address the question: can we
+train a better dense embedding model using only
+pairs of questions and passages (or answers), with-
+out additional pretraining? By leveraging the now
+standard BERT pretrained model (Devlin et al.,
+2019) and a dual-encoder architecture (Bromley
+et al., 1994), we focus on developing the right
+training scheme using a relatively small number
+of question and passage pairs. Through a series
+of careful ablation studies, our ﬁnal solution is
+surprisingly simple: the embedding is optimized
+for maximizing inner products of the question and
+relevant passage vectors, with an objective compar-
+ing all pairs of questions and passages in a batch.
+Our Dense Passage Retriever (DPR) is exception-
+ally strong. It not only outperforms BM25 by a
+large margin (65.2% vs. 42.9% in Top-5 accuracy),
+but also results in a substantial improvement on
+the end-to-end QA accuracy compared to ORQA
+(41.5% vs. 33.3%) in the open Natural Questions
+setting (Lee et al., 2019; Kwiatkowski et al., 2019).
+Our contributions are twofold. First, we demon-
+strate that with the proper training setup, sim-
+ply ﬁne-tuning the question and passage encoders
+on existing question-passage pairs is sufﬁcient to
+greatly outperform BM25. Our empirical results
+also suggest that additional pretraining may not be
+needed. Second, we verify that, in the context of
+open-domain question answering, a higher retrieval
+precision indeed translates to a higher end-to-end
+QA accuracy. By applying a modern reader model
+to the top retrieved passages, we achieve compara-
+ble or better results on multiple QA datasets in the
+open-retrieval setting, compared to several, much
+complicated systems.
+2
+Background
+The problem of open-domain QA studied in this
+paper can be described as follows. Given a factoid
+question, such as “Who ﬁrst voiced Meg on Family
+Guy?” or “Where was the 8th Dalai Lama born?”, a
+system is required to answer it using a large corpus
+of diversiﬁed topics. More speciﬁcally, we assume
+the extractive QA setting, in which the answer is
+restricted to a span appearing in one or more pas-
+sages in the corpus. A
+==========================================================================================
+QUESTION 7: How does the attention mechanism help a model process relationships between words?
+EXPECTED SOURCE: 1706.03762v7.txt
+EXPECTED PDF PAGES: [2, 3]
+----------------------------------------------------------------------
+PDF PAGE 2
+1
+Introduction
+Recurrent neural networks, long short-term memory [13] and gated recurrent [7] neural networks
+in particular, have been firmly established as state of the art approaches in sequence modeling and
+transduction problems such as language modeling and machine translation [35, 2, 5]. Numerous
+efforts have since continued to push the boundaries of recurrent language models and encoder-decoder
+architectures [38, 24, 15].
+Recurrent models typically factor computation along the symbol positions of the input and output
+sequences. Aligning the positions to steps in computation time, they generate a sequence of hidden
+states ht, as a function of the previous hidden state ht−1 and the input for position t. This inherently
+sequential nature precludes parallelization within training examples, which becomes critical at longer
+sequence lengths, as memory constraints limit batching across examples. Recent work has achieved
+significant improvements in computational efficiency through factorization tricks [21] and conditional
+computation [32], while also improving model performance in case of the latter. The fundamental
+constraint of sequential computation, however, remains.
+Attention mechanisms have become an integral part of compelling sequence modeling and transduc-
+tion models in various tasks, allowing modeling of dependencies without regard to their distance in
+the input or output sequences [2, 19]. In all but a few cases [27], however, such attention mechanisms
+are used in conjunction with a recurrent network.
+In this work we propose the Transformer, a model architecture eschewing recurrence and instead
+relying entirely on an attention mechanism to draw global dependencies between input and output.
+The Transformer allows for significantly more parallelization and can reach a new state of the art in
+translation quality after being trained for as little as twelve hours on eight P100 GPUs.
+2
+Background
+The goal of reducing sequential computation also forms the foundation of the Extended Neural GPU
+[16], ByteNet [18] and ConvS2S [9], all of which use convolutional neural networks as basic building
+block, computing hidden representations in parallel for all input and output positions. In these models,
+the number of operations required to relate signals from two arbitrary input or output positions grows
+in the distance between positions, linearly for ConvS2S and logarithmically for ByteNet. This makes
+it more difficult to learn dependencies between distant posi
+----------------------------------------------------------------------
+PDF PAGE 3
+Figure 1: The Transformer - model architecture.
+The Transformer follows this overall architecture using stacked self-attention and point-wise, fully
+connected layers for both the encoder and decoder, shown in the left and right halves of Figure 1,
+respectively.
+3.1
+Encoder and Decoder Stacks
+Encoder:
+The encoder is composed of a stack of N = 6 identical layers. Each layer has two
+sub-layers. The first is a multi-head self-attention mechanism, and the second is a simple, position-
+wise fully connected feed-forward network. We employ a residual connection [11] around each of
+the two sub-layers, followed by layer normalization [1]. That is, the output of each sub-layer is
+LayerNorm(x + Sublayer(x)), where Sublayer(x) is the function implemented by the sub-layer
+itself. To facilitate these residual connections, all sub-layers in the model, as well as the embedding
+layers, produce outputs of dimension dmodel = 512.
+Decoder:
+The decoder is also composed of a stack of N = 6 identical layers. In addition to the two
+sub-layers in each encoder layer, the decoder inserts a third sub-layer, which performs multi-head
+attention over the output of the encoder stack. Similar to the encoder, we employ residual connections
+around each of the sub-layers, followed by layer normalization. We also modify the self-attention
+sub-layer in the decoder stack to prevent positions from attending to subsequent positions. This
+masking, combined with fact that the output embeddings are offset by one position, ensures that the
+predictions for position i can depend only on the known outputs at positions less than i.
+3.2
+Attention
+An attention function can be described as mapping a query and a set of key-value pairs to an output,
+where the query, keys, values, and output are all vectors. The output is computed as a weighted sum
+3
+==========================================================================================
+QUESTION 8: What is self-attention in the Transformer architecture?
+EXPECTED SOURCE: 1706.03762v7.txt
+EXPECTED PDF PAGES: [3]
+----------------------------------------------------------------------
+PDF PAGE 3
+Figure 1: The Transformer - model architecture.
+The Transformer follows this overall architecture using stacked self-attention and point-wise, fully
+connected layers for both the encoder and decoder, shown in the left and right halves of Figure 1,
+respectively.
+3.1
+Encoder and Decoder Stacks
+Encoder:
+The encoder is composed of a stack of N = 6 identical layers. Each layer has two
+sub-layers. The first is a multi-head self-attention mechanism, and the second is a simple, position-
+wise fully connected feed-forward network. We employ a residual connection [11] around each of
+the two sub-layers, followed by layer normalization [1]. That is, the output of each sub-layer is
+LayerNorm(x + Sublayer(x)), where Sublayer(x) is the function implemented by the sub-layer
+itself. To facilitate these residual connections, all sub-layers in the model, as well as the embedding
+layers, produce outputs of dimension dmodel = 512.
+Decoder:
+The decoder is also composed of a stack of N = 6 identical layers. In addition to the two
+sub-layers in each encoder layer, the decoder inserts a third sub-layer, which performs multi-head
+attention over the output of the encoder stack. Similar to the encoder, we employ residual connections
+around each of the sub-layers, followed by layer normalization. We also modify the self-attention
+sub-layer in the decoder stack to prevent positions from attending to subsequent positions. This
+masking, combined with fact that the output embeddings are offset by one position, ensures that the
+predictions for position i can depend only on the known outputs at positions less than i.
+3.2
+Attention
+An attention function can be described as mapping a query and a set of key-value pairs to an output,
+where the query, keys, values, and output are all vectors. The output is computed as a weighted sum
+3
+==========================================================================================
+QUESTION 9: What is the purpose of positional encoding in the Transformer?
+EXPECTED SOURCE: 1706.03762v7.txt
+EXPECTED PDF PAGES: [6]
+----------------------------------------------------------------------
+PDF PAGE 6
+Table 1: Maximum path lengths, per-layer complexity and minimum number of sequential operations
+for different layer types. n is the sequence length, d is the representation dimension, k is the kernel
+size of convolutions and r the size of the neighborhood in restricted self-attention.
+Layer Type
+Complexity per Layer
+Sequential
+Maximum Path Length
+Operations
+Self-Attention
+O(n2 · d)
+O(1)
+O(1)
+Recurrent
+O(n · d2)
+O(n)
+O(n)
+Convolutional
+O(k · n · d2)
+O(1)
+O(logk(n))
+Self-Attention (restricted)
+O(r · n · d)
+O(1)
+O(n/r)
+3.5
+Positional Encoding
+Since our model contains no recurrence and no convolution, in order for the model to make use of the
+order of the sequence, we must inject some information about the relative or absolute position of the
+tokens in the sequence. To this end, we add "positional encodings" to the input embeddings at the
+bottoms of the encoder and decoder stacks. The positional encodings have the same dimension dmodel
+as the embeddings, so that the two can be summed. There are many choices of positional encodings,
+learned and fixed [9].
+In this work, we use sine and cosine functions of different frequencies:
+PE(pos,2i) = sin(pos/100002i/dmodel)
+PE(pos,2i+1) = cos(pos/100002i/dmodel)
+where pos is the position and i is the dimension. That is, each dimension of the positional encoding
+corresponds to a sinusoid. The wavelengths form a geometric progression from 2π to 10000 · 2π. We
+chose this function because we hypothesized it would allow the model to easily learn to attend by
+relative positions, since for any fixed offset k, PEpos+k can be represented as a linear function of
+PEpos.
+We also experimented with using learned positional embeddings [9] instead, and found that the two
+versions produced nearly identical results (see Table 3 row (E)). We chose the sinusoidal version
+because it may allow the model to extrapolate to sequence lengths longer than the ones encountered
+during training.
+4
+Why Self-Attention
+In this section we compare various aspects of self-attention layers to the recurrent and convolu-
+tional layers commonly used for mapping one variable-length sequence of symbol representations
+(x1, ..., xn) to another sequence of equal length (z1, ..., zn), with xi, zi ∈Rd, such as a hidden
+layer in a typical sequence transduction encoder or decoder. Motivating our use of self-attention we
+consider three desiderata.
+One is the total computational complexity per layer. Another is the amount of computation that can
+be parallelized, as measure
+==========================================================================================
+QUESTION 10: How does retrieval-augmented generation combine a retriever and a generator?
+EXPECTED SOURCE: 2005.11401v4.txt
+EXPECTED PDF PAGES: [1, 2]
+----------------------------------------------------------------------
+PDF PAGE 1
+Retrieval-Augmented Generation for
+Knowledge-Intensive NLP Tasks
+Patrick Lewis†‡, Ethan Perez⋆,
+Aleksandra Piktus†, Fabio Petroni†, Vladimir Karpukhin†, Naman Goyal†, Heinrich Küttler†,
+Mike Lewis†, Wen-tau Yih†, Tim Rocktäschel†‡, Sebastian Riedel†‡, Douwe Kiela†
+†Facebook AI Research; ‡University College London; ⋆New York University;
+plewis@fb.com
+Abstract
+Large pre-trained language models have been shown to store factual knowledge
+in their parameters, and achieve state-of-the-art results when ﬁne-tuned on down-
+stream NLP tasks. However, their ability to access and precisely manipulate knowl-
+edge is still limited, and hence on knowledge-intensive tasks, their performance
+lags behind task-speciﬁc architectures. Additionally, providing provenance for their
+decisions and updating their world knowledge remain open research problems. Pre-
+trained models with a differentiable access mechanism to explicit non-parametric
+memory have so far been only investigated for extractive downstream tasks. We
+explore a general-purpose ﬁne-tuning recipe for retrieval-augmented generation
+(RAG) — models which combine pre-trained parametric and non-parametric mem-
+ory for language generation. We introduce RAG models where the parametric
+memory is a pre-trained seq2seq model and the non-parametric memory is a dense
+vector index of Wikipedia, accessed with a pre-trained neural retriever. We com-
+pare two RAG formulations, one which conditions on the same retrieved passages
+across the whole generated sequence, and another which can use different passages
+per token. We ﬁne-tune and evaluate our models on a wide range of knowledge-
+intensive NLP tasks and set the state of the art on three open domain QA tasks,
+outperforming parametric seq2seq models and task-speciﬁc retrieve-and-extract
+architectures. For language generation tasks, we ﬁnd that RAG models generate
+more speciﬁc, diverse and factual language than a state-of-the-art parametric-only
+seq2seq baseline.
+1
+Introduction
+Pre-trained neural language models have been shown to learn a substantial amount of in-depth knowl-
+edge from data [47]. They can do so without any access to an external memory, as a parameterized
+implicit knowledge base [51, 52]. While this development is exciting, such models do have down-
+sides: They cannot easily expand or revise their memory, can’t straightforwardly provide insight into
+their predictions, and may produce “hallucinations” [38]. Hybrid models that combine parametric
+memory with non-param
+----------------------------------------------------------------------
+PDF PAGE 2
+The Divine
+Comedy (x)
+q
+Query
+Encoder
+q(x)
+MIPS
+pθ
+Generator pθ
+(Parametric)
+Margin-
+alize
+This 14th century work
+is divided into 3
+sections: "Inferno",
+"Purgatorio" &
+"Paradiso"         (y)
+End-to-End Backprop through q and pθ
+Barack Obama was
+born in Hawaii.(x)
+Fact Veriﬁcation: Fact Query
+supports (y)
+Question Generation
+Fact Veriﬁcation:
+Label Generation
+Document
+Index
+Define "middle ear"(x)
+Question Answering:
+Question Query
+The middle ear includes
+the tympanic cavity and
+the three ossicles.  (y)
+Question Answering:
+Answer Generation
+Retriever pη
+(Non-Parametric)
+z4
+z3
+z2
+z1
+d(z)
+Jeopardy Question
+Generation:
+Answer Query
+Figure 1: Overview of our approach. We combine a pre-trained retriever (Query Encoder + Document
+Index) with a pre-trained seq2seq model (Generator) and ﬁne-tune end-to-end. For query x, we use
+Maximum Inner Product Search (MIPS) to ﬁnd the top-K documents zi. For ﬁnal prediction y, we
+treat z as a latent variable and marginalize over seq2seq predictions given different documents.
+but have only explored open-domain extractive question answering. Here, we bring hybrid parametric
+and non-parametric memory to the “workhorse of NLP,” i.e. sequence-to-sequence (seq2seq) models.
+We endow pre-trained, parametric-memory generation models with a non-parametric memory through
+a general-purpose ﬁne-tuning approach which we refer to as retrieval-augmented generation (RAG).
+We build RAG models where the parametric memory is a pre-trained seq2seq transformer, and the
+non-parametric memory is a dense vector index of Wikipedia, accessed with a pre-trained neural
+retriever. We combine these components in a probabilistic model trained end-to-end (Fig. 1). The
+retriever (Dense Passage Retriever [26], henceforth DPR) provides latent documents conditioned on
+the input, and the seq2seq model (BART [32]) then conditions on these latent documents together with
+the input to generate the output. We marginalize the latent documents with a top-K approximation,
+either on a per-output basis (assuming the same document is responsible for all tokens) or a per-token
+basis (where different documents are responsible for different tokens). Like T5 [51] or BART, RAG
+can be ﬁne-tuned on any seq2seq task, whereby both the generator and retriever are jointly learned.
+There has been extensive previous work proposing architectures to enrich systems with non-parametric
+memory which are trained from scratch for speciﬁc tasks, e.g. memory networks [64, 55], stack-
+augmented net
+==========================================================================================
+QUESTION 11: What is the difference between a parametric memory and a non-parametric memory in retrieval-augmented generation?
+EXPECTED SOURCE: 2005.11401v4.txt
+EXPECTED PDF PAGES: [1, 2]
+----------------------------------------------------------------------
+PDF PAGE 1
+Retrieval-Augmented Generation for
+Knowledge-Intensive NLP Tasks
+Patrick Lewis†‡, Ethan Perez⋆,
+Aleksandra Piktus†, Fabio Petroni†, Vladimir Karpukhin†, Naman Goyal†, Heinrich Küttler†,
+Mike Lewis†, Wen-tau Yih†, Tim Rocktäschel†‡, Sebastian Riedel†‡, Douwe Kiela†
+†Facebook AI Research; ‡University College London; ⋆New York University;
+plewis@fb.com
+Abstract
+Large pre-trained language models have been shown to store factual knowledge
+in their parameters, and achieve state-of-the-art results when ﬁne-tuned on down-
+stream NLP tasks. However, their ability to access and precisely manipulate knowl-
+edge is still limited, and hence on knowledge-intensive tasks, their performance
+lags behind task-speciﬁc architectures. Additionally, providing provenance for their
+decisions and updating their world knowledge remain open research problems. Pre-
+trained models with a differentiable access mechanism to explicit non-parametric
+memory have so far been only investigated for extractive downstream tasks. We
+explore a general-purpose ﬁne-tuning recipe for retrieval-augmented generation
+(RAG) — models which combine pre-trained parametric and non-parametric mem-
+ory for language generation. We introduce RAG models where the parametric
+memory is a pre-trained seq2seq model and the non-parametric memory is a dense
+vector index of Wikipedia, accessed with a pre-trained neural retriever. We com-
+pare two RAG formulations, one which conditions on the same retrieved passages
+across the whole generated sequence, and another which can use different passages
+per token. We ﬁne-tune and evaluate our models on a wide range of knowledge-
+intensive NLP tasks and set the state of the art on three open domain QA tasks,
+outperforming parametric seq2seq models and task-speciﬁc retrieve-and-extract
+architectures. For language generation tasks, we ﬁnd that RAG models generate
+more speciﬁc, diverse and factual language than a state-of-the-art parametric-only
+seq2seq baseline.
+1
+Introduction
+Pre-trained neural language models have been shown to learn a substantial amount of in-depth knowl-
+edge from data [47]. They can do so without any access to an external memory, as a parameterized
+implicit knowledge base [51, 52]. While this development is exciting, such models do have down-
+sides: They cannot easily expand or revise their memory, can’t straightforwardly provide insight into
+their predictions, and may produce “hallucinations” [38]. Hybrid models that combine parametric
+memory with non-param
+----------------------------------------------------------------------
+PDF PAGE 2
+The Divine
+Comedy (x)
+q
+Query
+Encoder
+q(x)
+MIPS
+pθ
+Generator pθ
+(Parametric)
+Margin-
+alize
+This 14th century work
+is divided into 3
+sections: "Inferno",
+"Purgatorio" &
+"Paradiso"         (y)
+End-to-End Backprop through q and pθ
+Barack Obama was
+born in Hawaii.(x)
+Fact Veriﬁcation: Fact Query
+supports (y)
+Question Generation
+Fact Veriﬁcation:
+Label Generation
+Document
+Index
+Define "middle ear"(x)
+Question Answering:
+Question Query
+The middle ear includes
+the tympanic cavity and
+the three ossicles.  (y)
+Question Answering:
+Answer Generation
+Retriever pη
+(Non-Parametric)
+z4
+z3
+z2
+z1
+d(z)
+Jeopardy Question
+Generation:
+Answer Query
+Figure 1: Overview of our approach. We combine a pre-trained retriever (Query Encoder + Document
+Index) with a pre-trained seq2seq model (Generator) and ﬁne-tune end-to-end. For query x, we use
+Maximum Inner Product Search (MIPS) to ﬁnd the top-K documents zi. For ﬁnal prediction y, we
+treat z as a latent variable and marginalize over seq2seq predictions given different documents.
+but have only explored open-domain extractive question answering. Here, we bring hybrid parametric
+and non-parametric memory to the “workhorse of NLP,” i.e. sequence-to-sequence (seq2seq) models.
+We endow pre-trained, parametric-memory generation models with a non-parametric memory through
+a general-purpose ﬁne-tuning approach which we refer to as retrieval-augmented generation (RAG).
+We build RAG models where the parametric memory is a pre-trained seq2seq transformer, and the
+non-parametric memory is a dense vector index of Wikipedia, accessed with a pre-trained neural
+retriever. We combine these components in a probabilistic model trained end-to-end (Fig. 1). The
+retriever (Dense Passage Retriever [26], henceforth DPR) provides latent documents conditioned on
+the input, and the seq2seq model (BART [32]) then conditions on these latent documents together with
+the input to generate the output. We marginalize the latent documents with a top-K approximation,
+either on a per-output basis (assuming the same document is responsible for all tokens) or a per-token
+basis (where different documents are responsible for different tokens). Like T5 [51] or BART, RAG
+can be ﬁne-tuned on any seq2seq task, whereby both the generator and retriever are jointly learned.
+There has been extensive previous work proposing architectures to enrich systems with non-parametric
+memory which are trained from scratch for speciﬁc tasks, e.g. memory networks [64, 55], stack-
+augmented net
+==========================================================================================
+QUESTION 12: How can retrieved passages help a language model answer knowledge-intensive questions?
+EXPECTED SOURCE: 2005.11401v4.txt
+EXPECTED PDF PAGES: [1, 2]
+----------------------------------------------------------------------
+PDF PAGE 1
+Retrieval-Augmented Generation for
+Knowledge-Intensive NLP Tasks
+Patrick Lewis†‡, Ethan Perez⋆,
+Aleksandra Piktus†, Fabio Petroni†, Vladimir Karpukhin†, Naman Goyal†, Heinrich Küttler†,
+Mike Lewis†, Wen-tau Yih†, Tim Rocktäschel†‡, Sebastian Riedel†‡, Douwe Kiela†
+†Facebook AI Research; ‡University College London; ⋆New York University;
+plewis@fb.com
+Abstract
+Large pre-trained language models have been shown to store factual knowledge
+in their parameters, and achieve state-of-the-art results when ﬁne-tuned on down-
+stream NLP tasks. However, their ability to access and precisely manipulate knowl-
+edge is still limited, and hence on knowledge-intensive tasks, their performance
+lags behind task-speciﬁc architectures. Additionally, providing provenance for their
+decisions and updating their world knowledge remain open research problems. Pre-
+trained models with a differentiable access mechanism to explicit non-parametric
+memory have so far been only investigated for extractive downstream tasks. We
+explore a general-purpose ﬁne-tuning recipe for retrieval-augmented generation
+(RAG) — models which combine pre-trained parametric and non-parametric mem-
+ory for language generation. We introduce RAG models where the parametric
+memory is a pre-trained seq2seq model and the non-parametric memory is a dense
+vector index of Wikipedia, accessed with a pre-trained neural retriever. We com-
+pare two RAG formulations, one which conditions on the same retrieved passages
+across the whole generated sequence, and another which can use different passages
+per token. We ﬁne-tune and evaluate our models on a wide range of knowledge-
+intensive NLP tasks and set the state of the art on three open domain QA tasks,
+outperforming parametric seq2seq models and task-speciﬁc retrieve-and-extract
+architectures. For language generation tasks, we ﬁnd that RAG models generate
+more speciﬁc, diverse and factual language than a state-of-the-art parametric-only
+seq2seq baseline.
+1
+Introduction
+Pre-trained neural language models have been shown to learn a substantial amount of in-depth knowl-
+edge from data [47]. They can do so without any access to an external memory, as a parameterized
+implicit knowledge base [51, 52]. While this development is exciting, such models do have down-
+sides: They cannot easily expand or revise their memory, can’t straightforwardly provide insight into
+their predictions, and may produce “hallucinations” [38]. Hybrid models that combine parametric
+memory with non-param
+----------------------------------------------------------------------
+PDF PAGE 2
+The Divine
+Comedy (x)
+q
+Query
+Encoder
+q(x)
+MIPS
+pθ
+Generator pθ
+(Parametric)
+Margin-
+alize
+This 14th century work
+is divided into 3
+sections: "Inferno",
+"Purgatorio" &
+"Paradiso"         (y)
+End-to-End Backprop through q and pθ
+Barack Obama was
+born in Hawaii.(x)
+Fact Veriﬁcation: Fact Query
+supports (y)
+Question Generation
+Fact Veriﬁcation:
+Label Generation
+Document
+Index
+Define "middle ear"(x)
+Question Answering:
+Question Query
+The middle ear includes
+the tympanic cavity and
+the three ossicles.  (y)
+Question Answering:
+Answer Generation
+Retriever pη
+(Non-Parametric)
+z4
+z3
+z2
+z1
+d(z)
+Jeopardy Question
+Generation:
+Answer Query
+Figure 1: Overview of our approach. We combine a pre-trained retriever (Query Encoder + Document
+Index) with a pre-trained seq2seq model (Generator) and ﬁne-tune end-to-end. For query x, we use
+Maximum Inner Product Search (MIPS) to ﬁnd the top-K documents zi. For ﬁnal prediction y, we
+treat z as a latent variable and marginalize over seq2seq predictions given different documents.
+but have only explored open-domain extractive question answering. Here, we bring hybrid parametric
+and non-parametric memory to the “workhorse of NLP,” i.e. sequence-to-sequence (seq2seq) models.
+We endow pre-trained, parametric-memory generation models with a non-parametric memory through
+a general-purpose ﬁne-tuning approach which we refer to as retrieval-augmented generation (RAG).
+We build RAG models where the parametric memory is a pre-trained seq2seq transformer, and the
+non-parametric memory is a dense vector index of Wikipedia, accessed with a pre-trained neural
+retriever. We combine these components in a probabilistic model trained end-to-end (Fig. 1). The
+retriever (Dense Passage Retriever [26], henceforth DPR) provides latent documents conditioned on
+the input, and the seq2seq model (BART [32]) then conditions on these latent documents together with
+the input to generate the output. We marginalize the latent documents with a top-K approximation,
+either on a per-output basis (assuming the same document is responsible for all tokens) or a per-token
+basis (where different documents are responsible for different tokens). Like T5 [51] or BART, RAG
+can be ﬁne-tuned on any seq2seq task, whereby both the generator and retriever are jointly learned.
+There has been extensive previous work proposing architectures to enrich systems with non-parametric
+memory which are trained from scratch for speciﬁc tasks, e.g. memory networks [64, 55], stack-
+augmented net
+==========================================================================================
+QUESTION 13: How does Dense Passage Retrieval differ from traditional sparse retrieval methods?
+EXPECTED SOURCE: 2020.emnlp-main.550.txt
+EXPECTED PDF PAGES: [1, 2]
+----------------------------------------------------------------------
+PDF PAGE 1
+Proceedings of the 2020 Conference on Empirical Methods in Natural Language Processing, pages 6769–6781,
+November 16–20, 2020. c⃝2020 Association for Computational Linguistics
+6769
+Dense Passage Retrieval for Open-Domain Question Answering
+Vladimir Karpukhin∗, Barlas O˘guz∗, Sewon Min†, Patrick Lewis,
+Ledell Wu, Sergey Edunov, Danqi Chen‡, Wen-tau Yih
+Facebook AI
+†University of Washington
+‡Princeton University
+{vladk, barlaso, plewis, ledell, edunov, scottyih}@fb.com
+sewon@cs.washington.edu
+danqic@cs.princeton.edu
+Abstract
+Open-domain question answering relies on ef-
+ﬁcient passage retrieval to select candidate
+contexts, where traditional sparse vector space
+models, such as TF-IDF or BM25, are the de
+facto method.
+In this work, we show that
+retrieval can be practically implemented us-
+ing dense representations alone, where em-
+beddings are learned from a small number
+of questions and passages by a simple dual-
+encoder framework.
+When evaluated on a
+wide range of open-domain QA datasets, our
+dense retriever outperforms a strong Lucene-
+BM25 system greatly by 9%-19% absolute in
+terms of top-20 passage retrieval accuracy, and
+helps our end-to-end QA system establish new
+state-of-the-art on multiple open-domain QA
+benchmarks.1
+1
+Introduction
+Open-domain question answering (QA) (Voorhees,
+1999) is a task that answers factoid questions us-
+ing a large collection of documents. While early
+QA systems are often complicated and consist of
+multiple components (Ferrucci (2012); Moldovan
+et al. (2003), inter alia), the advances of reading
+comprehension models suggest a much simpliﬁed
+two-stage framework: (1) a context retriever ﬁrst
+selects a small subset of passages where some
+of them contain the answer to the question, and
+then (2) a machine reader can thoroughly exam-
+ine the retrieved contexts and identify the correct
+answer (Chen et al., 2017). Although reducing
+open-domain QA to machine reading is a very rea-
+sonable strategy, a huge performance degradation
+is often observed in practice2, indicating the needs
+of improving retrieval.
+∗Equal contribution
+1The code and trained models have been released at
+https://github.com/facebookresearch/DPR.
+2For instance, the exact match score on SQuAD v1.1 drops
+from above 80% to less than 40% (Yang et al., 2019a).
+Retrieval in open-domain QA is usually imple-
+mented using TF-IDF or BM25 (Robertson and
+Zaragoza, 2009), which matches keywords efﬁ-
+ciently with an inverted index and can be seen
+as representing the question and c
+----------------------------------------------------------------------
+PDF PAGE 2
+6770
+QA datasets, it also suffers from two weaknesses.
+First, ICT pretraining is computationally intensive
+and it is not completely clear that regular sentences
+are good surrogates of questions in the objective
+function. Second, because the context encoder is
+not ﬁne-tuned using pairs of questions and answers,
+the corresponding representations could be subop-
+timal.
+In this paper, we address the question: can we
+train a better dense embedding model using only
+pairs of questions and passages (or answers), with-
+out additional pretraining? By leveraging the now
+standard BERT pretrained model (Devlin et al.,
+2019) and a dual-encoder architecture (Bromley
+et al., 1994), we focus on developing the right
+training scheme using a relatively small number
+of question and passage pairs. Through a series
+of careful ablation studies, our ﬁnal solution is
+surprisingly simple: the embedding is optimized
+for maximizing inner products of the question and
+relevant passage vectors, with an objective compar-
+ing all pairs of questions and passages in a batch.
+Our Dense Passage Retriever (DPR) is exception-
+ally strong. It not only outperforms BM25 by a
+large margin (65.2% vs. 42.9% in Top-5 accuracy),
+but also results in a substantial improvement on
+the end-to-end QA accuracy compared to ORQA
+(41.5% vs. 33.3%) in the open Natural Questions
+setting (Lee et al., 2019; Kwiatkowski et al., 2019).
+Our contributions are twofold. First, we demon-
+strate that with the proper training setup, sim-
+ply ﬁne-tuning the question and passage encoders
+on existing question-passage pairs is sufﬁcient to
+greatly outperform BM25. Our empirical results
+also suggest that additional pretraining may not be
+needed. Second, we verify that, in the context of
+open-domain question answering, a higher retrieval
+precision indeed translates to a higher end-to-end
+QA accuracy. By applying a modern reader model
+to the top retrieved passages, we achieve compara-
+ble or better results on multiple QA datasets in the
+open-retrieval setting, compared to several, much
+complicated systems.
+2
+Background
+The problem of open-domain QA studied in this
+paper can be described as follows. Given a factoid
+question, such as “Who ﬁrst voiced Meg on Family
+Guy?” or “Where was the 8th Dalai Lama born?”, a
+system is required to answer it using a large corpus
+of diversiﬁed topics. More speciﬁcally, we assume
+the extractive QA setting, in which the answer is
+restricted to a span appearing in one or more pas-
+sages in the corpus. A
+==========================================================================================
+QUESTION 14: What is the purpose of multi-head attention?
+EXPECTED SOURCE: 1706.03762v7.txt
+EXPECTED PDF PAGES: [5]
+----------------------------------------------------------------------
+PDF PAGE 5
+output values. These are concatenated and once again projected, resulting in the final values, as
+depicted in Figure 2.
+Multi-head attention allows the model to jointly attend to information from different representation
+subspaces at different positions. With a single attention head, averaging inhibits this.
+MultiHead(Q, K, V ) = Concat(head1, ..., headh)W O
+where headi = Attention(QW Q
+i , KW K
+i , V W V
+i )
+Where the projections are parameter matrices W Q
+i
+∈Rdmodel×dk, W K
+i
+∈Rdmodel×dk, W V
+i
+∈Rdmodel×dv
+and W O ∈Rhdv×dmodel.
+In this work we employ h = 8 parallel attention layers, or heads. For each of these we use
+dk = dv = dmodel/h = 64. Due to the reduced dimension of each head, the total computational cost
+is similar to that of single-head attention with full dimensionality.
+3.2.3
+Applications of Attention in our Model
+The Transformer uses multi-head attention in three different ways:
+• In "encoder-decoder attention" layers, the queries come from the previous decoder layer,
+and the memory keys and values come from the output of the encoder. This allows every
+position in the decoder to attend over all positions in the input sequence. This mimics the
+typical encoder-decoder attention mechanisms in sequence-to-sequence models such as
+[38, 2, 9].
+• The encoder contains self-attention layers. In a self-attention layer all of the keys, values
+and queries come from the same place, in this case, the output of the previous layer in the
+encoder. Each position in the encoder can attend to all positions in the previous layer of the
+encoder.
+• Similarly, self-attention layers in the decoder allow each position in the decoder to attend to
+all positions in the decoder up to and including that position. We need to prevent leftward
+information flow in the decoder to preserve the auto-regressive property. We implement this
+inside of scaled dot-product attention by masking out (setting to −∞) all values in the input
+of the softmax which correspond to illegal connections. See Figure 2.
+3.3
+Position-wise Feed-Forward Networks
+In addition to attention sub-layers, each of the layers in our encoder and decoder contains a fully
+connected feed-forward network, which is applied to each position separately and identically. This
+consists of two linear transformations with a ReLU activation in between.
+FFN(x) = max(0, xW1 + b1)W2 + b2
+(2)
+While the linear transformations are the same across different positions, they use different parameters
+from layer to layer. Another way of d
+==========================================================================================
+QUESTION 15: Why can dense retrieval be useful when a question uses different words from the relevant passage?
+EXPECTED SOURCE: 2020.emnlp-main.550.txt
+EXPECTED PDF PAGES: [1]
+----------------------------------------------------------------------
+PDF PAGE 1
+Proceedings of the 2020 Conference on Empirical Methods in Natural Language Processing, pages 6769–6781,
+November 16–20, 2020. c⃝2020 Association for Computational Linguistics
+6769
+Dense Passage Retrieval for Open-Domain Question Answering
+Vladimir Karpukhin∗, Barlas O˘guz∗, Sewon Min†, Patrick Lewis,
+Ledell Wu, Sergey Edunov, Danqi Chen‡, Wen-tau Yih
+Facebook AI
+†University of Washington
+‡Princeton University
+{vladk, barlaso, plewis, ledell, edunov, scottyih}@fb.com
+sewon@cs.washington.edu
+danqic@cs.princeton.edu
+Abstract
+Open-domain question answering relies on ef-
+ﬁcient passage retrieval to select candidate
+contexts, where traditional sparse vector space
+models, such as TF-IDF or BM25, are the de
+facto method.
+In this work, we show that
+retrieval can be practically implemented us-
+ing dense representations alone, where em-
+beddings are learned from a small number
+of questions and passages by a simple dual-
+encoder framework.
+When evaluated on a
+wide range of open-domain QA datasets, our
+dense retriever outperforms a strong Lucene-
+BM25 system greatly by 9%-19% absolute in
+terms of top-20 passage retrieval accuracy, and
+helps our end-to-end QA system establish new
+state-of-the-art on multiple open-domain QA
+benchmarks.1
+1
+Introduction
+Open-domain question answering (QA) (Voorhees,
+1999) is a task that answers factoid questions us-
+ing a large collection of documents. While early
+QA systems are often complicated and consist of
+multiple components (Ferrucci (2012); Moldovan
+et al. (2003), inter alia), the advances of reading
+comprehension models suggest a much simpliﬁed
+two-stage framework: (1) a context retriever ﬁrst
+selects a small subset of passages where some
+of them contain the answer to the question, and
+then (2) a machine reader can thoroughly exam-
+ine the retrieved contexts and identify the correct
+answer (Chen et al., 2017). Although reducing
+open-domain QA to machine reading is a very rea-
+sonable strategy, a huge performance degradation
+is often observed in practice2, indicating the needs
+of improving retrieval.
+∗Equal contribution
+1The code and trained models have been released at
+https://github.com/facebookresearch/DPR.
+2For instance, the exact match score on SQuAD v1.1 drops
+from above 80% to less than 40% (Yang et al., 2019a).
+Retrieval in open-domain QA is usually imple-
+mented using TF-IDF or BM25 (Robertson and
+Zaragoza, 2009), which matches keywords efﬁ-
+ciently with an inverted index and can be seen
+as representing the question and c
+==========================================================================================
+QUESTION 16: What are the main components of the Transformer encoder layer?
+EXPECTED SOURCE: 1706.03762v7.txt
+EXPECTED PDF PAGES: [3]
+----------------------------------------------------------------------
+PDF PAGE 3
+Figure 1: The Transformer - model architecture.
+The Transformer follows this overall architecture using stacked self-attention and point-wise, fully
+connected layers for both the encoder and decoder, shown in the left and right halves of Figure 1,
+respectively.
+3.1
+Encoder and Decoder Stacks
+Encoder:
+The encoder is composed of a stack of N = 6 identical layers. Each layer has two
+sub-layers. The first is a multi-head self-attention mechanism, and the second is a simple, position-
+wise fully connected feed-forward network. We employ a residual connection [11] around each of
+the two sub-layers, followed by layer normalization [1]. That is, the output of each sub-layer is
+LayerNorm(x + Sublayer(x)), where Sublayer(x) is the function implemented by the sub-layer
+itself. To facilitate these residual connections, all sub-layers in the model, as well as the embedding
+layers, produce outputs of dimension dmodel = 512.
+Decoder:
+The decoder is also composed of a stack of N = 6 identical layers. In addition to the two
+sub-layers in each encoder layer, the decoder inserts a third sub-layer, which performs multi-head
+attention over the output of the encoder stack. Similar to the encoder, we employ residual connections
+around each of the sub-layers, followed by layer normalization. We also modify the self-attention
+sub-layer in the decoder stack to prevent positions from attending to subsequent positions. This
+masking, combined with fact that the output embeddings are offset by one position, ensures that the
+predictions for position i can depend only on the known outputs at positions less than i.
+3.2
+Attention
+An attention function can be described as mapping a query and a set of key-value pairs to an output,
+where the query, keys, values, and output are all vectors. The output is computed as a weighted sum
+3
+==========================================================================================
+QUESTION 17: How does scaled dot-product attention calculate attention scores?
+EXPECTED SOURCE: 1706.03762v7.txt
+EXPECTED PDF PAGES: [4]
+----------------------------------------------------------------------
+PDF PAGE 4
+Scaled Dot-Product Attention
+Multi-Head Attention
+Figure 2: (left) Scaled Dot-Product Attention. (right) Multi-Head Attention consists of several
+attention layers running in parallel.
+of the values, where the weight assigned to each value is computed by a compatibility function of the
+query with the corresponding key.
+3.2.1
+Scaled Dot-Product Attention
+We call our particular attention "Scaled Dot-Product Attention" (Figure 2). The input consists of
+queries and keys of dimension dk, and values of dimension dv. We compute the dot products of the
+query with all keys, divide each by √dk, and apply a softmax function to obtain the weights on the
+values.
+In practice, we compute the attention function on a set of queries simultaneously, packed together
+into a matrix Q. The keys and values are also packed together into matrices K and V . We compute
+the matrix of outputs as:
+Attention(Q, K, V ) = softmax(QKT
+√dk
+)V
+(1)
+The two most commonly used attention functions are additive attention [2], and dot-product (multi-
+plicative) attention. Dot-product attention is identical to our algorithm, except for the scaling factor
+of
+1
+√dk . Additive attention computes the compatibility function using a feed-forward network with
+a single hidden layer. While the two are similar in theoretical complexity, dot-product attention is
+much faster and more space-efficient in practice, since it can be implemented using highly optimized
+matrix multiplication code.
+While for small values of dk the two mechanisms perform similarly, additive attention outperforms
+dot product attention without scaling for larger values of dk [3]. We suspect that for large values of
+dk, the dot products grow large in magnitude, pushing the softmax function into regions where it has
+extremely small gradients 4. To counteract this effect, we scale the dot products by
+1
+√dk .
+3.2.2
+Multi-Head Attention
+Instead of performing a single attention function with dmodel-dimensional keys, values and queries,
+we found it beneficial to linearly project the queries, keys and values h times with different, learned
+linear projections to dk, dk and dv dimensions, respectively. On each of these projected versions of
+queries, keys and values we then perform the attention function in parallel, yielding dv-dimensional
+4To illustrate why the dot products get large, assume that the components of q and k are independent random
+variables with mean 0 and variance 1. Then their dot product, q · k = Pdk
+i=1 qiki, has mean 0 and varianc
+==========================================================================================
+QUESTION 18: What roles do queries, keys, and values play in attention?
+EXPECTED SOURCE: 1706.03762v7.txt
+EXPECTED PDF PAGES: [3]
+----------------------------------------------------------------------
+PDF PAGE 3
+Figure 1: The Transformer - model architecture.
+The Transformer follows this overall architecture using stacked self-attention and point-wise, fully
+connected layers for both the encoder and decoder, shown in the left and right halves of Figure 1,
+respectively.
+3.1
+Encoder and Decoder Stacks
+Encoder:
+The encoder is composed of a stack of N = 6 identical layers. Each layer has two
+sub-layers. The first is a multi-head self-attention mechanism, and the second is a simple, position-
+wise fully connected feed-forward network. We employ a residual connection [11] around each of
+the two sub-layers, followed by layer normalization [1]. That is, the output of each sub-layer is
+LayerNorm(x + Sublayer(x)), where Sublayer(x) is the function implemented by the sub-layer
+itself. To facilitate these residual connections, all sub-layers in the model, as well as the embedding
+layers, produce outputs of dimension dmodel = 512.
+Decoder:
+The decoder is also composed of a stack of N = 6 identical layers. In addition to the two
+sub-layers in each encoder layer, the decoder inserts a third sub-layer, which performs multi-head
+attention over the output of the encoder stack. Similar to the encoder, we employ residual connections
+around each of the sub-layers, followed by layer normalization. We also modify the self-attention
+sub-layer in the decoder stack to prevent positions from attending to subsequent positions. This
+masking, combined with fact that the output embeddings are offset by one position, ensures that the
+predictions for position i can depend only on the known outputs at positions less than i.
+3.2
+Attention
+An attention function can be described as mapping a query and a set of key-value pairs to an output,
+where the query, keys, values, and output are all vectors. The output is computed as a weighted sum
+3
+==========================================================================================
+QUESTION 19: Why is the dot product scaled in scaled dot-product attention?
+EXPECTED SOURCE: 1706.03762v7.txt
+EXPECTED PDF PAGES: [4]
+----------------------------------------------------------------------
+PDF PAGE 4
+Scaled Dot-Product Attention
+Multi-Head Attention
+Figure 2: (left) Scaled Dot-Product Attention. (right) Multi-Head Attention consists of several
+attention layers running in parallel.
+of the values, where the weight assigned to each value is computed by a compatibility function of the
+query with the corresponding key.
+3.2.1
+Scaled Dot-Product Attention
+We call our particular attention "Scaled Dot-Product Attention" (Figure 2). The input consists of
+queries and keys of dimension dk, and values of dimension dv. We compute the dot products of the
+query with all keys, divide each by √dk, and apply a softmax function to obtain the weights on the
+values.
+In practice, we compute the attention function on a set of queries simultaneously, packed together
+into a matrix Q. The keys and values are also packed together into matrices K and V . We compute
+the matrix of outputs as:
+Attention(Q, K, V ) = softmax(QKT
+√dk
+)V
+(1)
+The two most commonly used attention functions are additive attention [2], and dot-product (multi-
+plicative) attention. Dot-product attention is identical to our algorithm, except for the scaling factor
+of
+1
+√dk . Additive attention computes the compatibility function using a feed-forward network with
+a single hidden layer. While the two are similar in theoretical complexity, dot-product attention is
+much faster and more space-efficient in practice, since it can be implemented using highly optimized
+matrix multiplication code.
+While for small values of dk the two mechanisms perform similarly, additive attention outperforms
+dot product attention without scaling for larger values of dk [3]. We suspect that for large values of
+dk, the dot products grow large in magnitude, pushing the softmax function into regions where it has
+extremely small gradients 4. To counteract this effect, we scale the dot products by
+1
+√dk .
+3.2.2
+Multi-Head Attention
+Instead of performing a single attention function with dmodel-dimensional keys, values and queries,
+we found it beneficial to linearly project the queries, keys and values h times with different, learned
+linear projections to dk, dk and dv dimensions, respectively. On each of these projected versions of
+queries, keys and values we then perform the attention function in parallel, yielding dv-dimensional
+4To illustrate why the dot products get large, assume that the components of q and k are independent random
+variables with mean 0 and variance 1. Then their dot product, q · k = Pdk
+i=1 qiki, has mean 0 and varianc
+==========================================================================================
+QUESTION 20: How does multi-head attention combine information from multiple heads?
+EXPECTED SOURCE: 1706.03762v7.txt
+EXPECTED PDF PAGES: [5]
+----------------------------------------------------------------------
+PDF PAGE 5
+output values. These are concatenated and once again projected, resulting in the final values, as
+depicted in Figure 2.
+Multi-head attention allows the model to jointly attend to information from different representation
+subspaces at different positions. With a single attention head, averaging inhibits this.
+MultiHead(Q, K, V ) = Concat(head1, ..., headh)W O
+where headi = Attention(QW Q
+i , KW K
+i , V W V
+i )
+Where the projections are parameter matrices W Q
+i
+∈Rdmodel×dk, W K
+i
+∈Rdmodel×dk, W V
+i
+∈Rdmodel×dv
+and W O ∈Rhdv×dmodel.
+In this work we employ h = 8 parallel attention layers, or heads. For each of these we use
+dk = dv = dmodel/h = 64. Due to the reduced dimension of each head, the total computational cost
+is similar to that of single-head attention with full dimensionality.
+3.2.3
+Applications of Attention in our Model
+The Transformer uses multi-head attention in three different ways:
+• In "encoder-decoder attention" layers, the queries come from the previous decoder layer,
+and the memory keys and values come from the output of the encoder. This allows every
+position in the decoder to attend over all positions in the input sequence. This mimics the
+typical encoder-decoder attention mechanisms in sequence-to-sequence models such as
+[38, 2, 9].
+• The encoder contains self-attention layers. In a self-attention layer all of the keys, values
+and queries come from the same place, in this case, the output of the previous layer in the
+encoder. Each position in the encoder can attend to all positions in the previous layer of the
+encoder.
+• Similarly, self-attention layers in the decoder allow each position in the decoder to attend to
+all positions in the decoder up to and including that position. We need to prevent leftward
+information flow in the decoder to preserve the auto-regressive property. We implement this
+inside of scaled dot-product attention by masking out (setting to −∞) all values in the input
+of the softmax which correspond to illegal connections. See Figure 2.
+3.3
+Position-wise Feed-Forward Networks
+In addition to attention sub-layers, each of the layers in our encoder and decoder contains a fully
+connected feed-forward network, which is applied to each position separately and identically. This
+consists of two linear transformations with a ReLU activation in between.
+FFN(x) = max(0, xW1 + b1)W2 + b2
+(2)
+While the linear transformations are the same across different positions, they use different parameters
+from layer to layer. Another way of d
+==========================================================================================
+QUESTION 21: How does the Transformer decoder prevent access to future tokens?
+EXPECTED SOURCE: 1706.03762v7.txt
+EXPECTED PDF PAGES: [5]
+----------------------------------------------------------------------
+PDF PAGE 5
+output values. These are concatenated and once again projected, resulting in the final values, as
+depicted in Figure 2.
+Multi-head attention allows the model to jointly attend to information from different representation
+subspaces at different positions. With a single attention head, averaging inhibits this.
+MultiHead(Q, K, V ) = Concat(head1, ..., headh)W O
+where headi = Attention(QW Q
+i , KW K
+i , V W V
+i )
+Where the projections are parameter matrices W Q
+i
+∈Rdmodel×dk, W K
+i
+∈Rdmodel×dk, W V
+i
+∈Rdmodel×dv
+and W O ∈Rhdv×dmodel.
+In this work we employ h = 8 parallel attention layers, or heads. For each of these we use
+dk = dv = dmodel/h = 64. Due to the reduced dimension of each head, the total computational cost
+is similar to that of single-head attention with full dimensionality.
+3.2.3
+Applications of Attention in our Model
+The Transformer uses multi-head attention in three different ways:
+• In "encoder-decoder attention" layers, the queries come from the previous decoder layer,
+and the memory keys and values come from the output of the encoder. This allows every
+position in the decoder to attend over all positions in the input sequence. This mimics the
+typical encoder-decoder attention mechanisms in sequence-to-sequence models such as
+[38, 2, 9].
+• The encoder contains self-attention layers. In a self-attention layer all of the keys, values
+and queries come from the same place, in this case, the output of the previous layer in the
+encoder. Each position in the encoder can attend to all positions in the previous layer of the
+encoder.
+• Similarly, self-attention layers in the decoder allow each position in the decoder to attend to
+all positions in the decoder up to and including that position. We need to prevent leftward
+information flow in the decoder to preserve the auto-regressive property. We implement this
+inside of scaled dot-product attention by masking out (setting to −∞) all values in the input
+of the softmax which correspond to illegal connections. See Figure 2.
+3.3
+Position-wise Feed-Forward Networks
+In addition to attention sub-layers, each of the layers in our encoder and decoder contains a fully
+connected feed-forward network, which is applied to each position separately and identically. This
+consists of two linear transformations with a ReLU activation in between.
+FFN(x) = max(0, xW1 + b1)W2 + b2
+(2)
+While the linear transformations are the same across different positions, they use different parameters
+from layer to layer. Another way of d
+==========================================================================================
+QUESTION 22: Why does the Transformer require positional encodings?
+EXPECTED SOURCE: 1706.03762v7.txt
+EXPECTED PDF PAGES: [6]
+----------------------------------------------------------------------
+PDF PAGE 6
+Table 1: Maximum path lengths, per-layer complexity and minimum number of sequential operations
+for different layer types. n is the sequence length, d is the representation dimension, k is the kernel
+size of convolutions and r the size of the neighborhood in restricted self-attention.
+Layer Type
+Complexity per Layer
+Sequential
+Maximum Path Length
+Operations
+Self-Attention
+O(n2 · d)
+O(1)
+O(1)
+Recurrent
+O(n · d2)
+O(n)
+O(n)
+Convolutional
+O(k · n · d2)
+O(1)
+O(logk(n))
+Self-Attention (restricted)
+O(r · n · d)
+O(1)
+O(n/r)
+3.5
+Positional Encoding
+Since our model contains no recurrence and no convolution, in order for the model to make use of the
+order of the sequence, we must inject some information about the relative or absolute position of the
+tokens in the sequence. To this end, we add "positional encodings" to the input embeddings at the
+bottoms of the encoder and decoder stacks. The positional encodings have the same dimension dmodel
+as the embeddings, so that the two can be summed. There are many choices of positional encodings,
+learned and fixed [9].
+In this work, we use sine and cosine functions of different frequencies:
+PE(pos,2i) = sin(pos/100002i/dmodel)
+PE(pos,2i+1) = cos(pos/100002i/dmodel)
+where pos is the position and i is the dimension. That is, each dimension of the positional encoding
+corresponds to a sinusoid. The wavelengths form a geometric progression from 2π to 10000 · 2π. We
+chose this function because we hypothesized it would allow the model to easily learn to attend by
+relative positions, since for any fixed offset k, PEpos+k can be represented as a linear function of
+PEpos.
+We also experimented with using learned positional embeddings [9] instead, and found that the two
+versions produced nearly identical results (see Table 3 row (E)). We chose the sinusoidal version
+because it may allow the model to extrapolate to sequence lengths longer than the ones encountered
+during training.
+4
+Why Self-Attention
+In this section we compare various aspects of self-attention layers to the recurrent and convolu-
+tional layers commonly used for mapping one variable-length sequence of symbol representations
+(x1, ..., xn) to another sequence of equal length (z1, ..., zn), with xi, zi ∈Rd, such as a hidden
+layer in a typical sequence transduction encoder or decoder. Motivating our use of self-attention we
+consider three desiderata.
+One is the total computational complexity per layer. Another is the amount of computation that can
+be parallelized, as measure
+==========================================================================================
+QUESTION 23: How are positional encodings added to the Transformer's input embeddings?
+EXPECTED SOURCE: 1706.03762v7.txt
+EXPECTED PDF PAGES: [6]
+----------------------------------------------------------------------
+PDF PAGE 6
+Table 1: Maximum path lengths, per-layer complexity and minimum number of sequential operations
+for different layer types. n is the sequence length, d is the representation dimension, k is the kernel
+size of convolutions and r the size of the neighborhood in restricted self-attention.
+Layer Type
+Complexity per Layer
+Sequential
+Maximum Path Length
+Operations
+Self-Attention
+O(n2 · d)
+O(1)
+O(1)
+Recurrent
+O(n · d2)
+O(n)
+O(n)
+Convolutional
+O(k · n · d2)
+O(1)
+O(logk(n))
+Self-Attention (restricted)
+O(r · n · d)
+O(1)
+O(n/r)
+3.5
+Positional Encoding
+Since our model contains no recurrence and no convolution, in order for the model to make use of the
+order of the sequence, we must inject some information about the relative or absolute position of the
+tokens in the sequence. To this end, we add "positional encodings" to the input embeddings at the
+bottoms of the encoder and decoder stacks. The positional encodings have the same dimension dmodel
+as the embeddings, so that the two can be summed. There are many choices of positional encodings,
+learned and fixed [9].
+In this work, we use sine and cosine functions of different frequencies:
+PE(pos,2i) = sin(pos/100002i/dmodel)
+PE(pos,2i+1) = cos(pos/100002i/dmodel)
+where pos is the position and i is the dimension. That is, each dimension of the positional encoding
+corresponds to a sinusoid. The wavelengths form a geometric progression from 2π to 10000 · 2π. We
+chose this function because we hypothesized it would allow the model to easily learn to attend by
+relative positions, since for any fixed offset k, PEpos+k can be represented as a linear function of
+PEpos.
+We also experimented with using learned positional embeddings [9] instead, and found that the two
+versions produced nearly identical results (see Table 3 row (E)). We chose the sinusoidal version
+because it may allow the model to extrapolate to sequence lengths longer than the ones encountered
+during training.
+4
+Why Self-Attention
+In this section we compare various aspects of self-attention layers to the recurrent and convolu-
+tional layers commonly used for mapping one variable-length sequence of symbol representations
+(x1, ..., xn) to another sequence of equal length (z1, ..., zn), with xi, zi ∈Rd, such as a hidden
+layer in a typical sequence transduction encoder or decoder. Motivating our use of self-attention we
+consider three desiderata.
+One is the total computational complexity per layer. Another is the amount of computation that can
+be parallelized, as measure
+==========================================================================================
+QUESTION 24: What advantages does self-attention offer over recurrent layers?
+EXPECTED SOURCE: 1706.03762v7.txt
+EXPECTED PDF PAGES: [2, 4]
+----------------------------------------------------------------------
+PDF PAGE 2
+1
+Introduction
+Recurrent neural networks, long short-term memory [13] and gated recurrent [7] neural networks
+in particular, have been firmly established as state of the art approaches in sequence modeling and
+transduction problems such as language modeling and machine translation [35, 2, 5]. Numerous
+efforts have since continued to push the boundaries of recurrent language models and encoder-decoder
+architectures [38, 24, 15].
+Recurrent models typically factor computation along the symbol positions of the input and output
+sequences. Aligning the positions to steps in computation time, they generate a sequence of hidden
+states ht, as a function of the previous hidden state ht−1 and the input for position t. This inherently
+sequential nature precludes parallelization within training examples, which becomes critical at longer
+sequence lengths, as memory constraints limit batching across examples. Recent work has achieved
+significant improvements in computational efficiency through factorization tricks [21] and conditional
+computation [32], while also improving model performance in case of the latter. The fundamental
+constraint of sequential computation, however, remains.
+Attention mechanisms have become an integral part of compelling sequence modeling and transduc-
+tion models in various tasks, allowing modeling of dependencies without regard to their distance in
+the input or output sequences [2, 19]. In all but a few cases [27], however, such attention mechanisms
+are used in conjunction with a recurrent network.
+In this work we propose the Transformer, a model architecture eschewing recurrence and instead
+relying entirely on an attention mechanism to draw global dependencies between input and output.
+The Transformer allows for significantly more parallelization and can reach a new state of the art in
+translation quality after being trained for as little as twelve hours on eight P100 GPUs.
+2
+Background
+The goal of reducing sequential computation also forms the foundation of the Extended Neural GPU
+[16], ByteNet [18] and ConvS2S [9], all of which use convolutional neural networks as basic building
+block, computing hidden representations in parallel for all input and output positions. In these models,
+the number of operations required to relate signals from two arbitrary input or output positions grows
+in the distance between positions, linearly for ConvS2S and logarithmically for ByteNet. This makes
+it more difficult to learn dependencies between distant posi
+----------------------------------------------------------------------
+PDF PAGE 4
+Scaled Dot-Product Attention
+Multi-Head Attention
+Figure 2: (left) Scaled Dot-Product Attention. (right) Multi-Head Attention consists of several
+attention layers running in parallel.
+of the values, where the weight assigned to each value is computed by a compatibility function of the
+query with the corresponding key.
+3.2.1
+Scaled Dot-Product Attention
+We call our particular attention "Scaled Dot-Product Attention" (Figure 2). The input consists of
+queries and keys of dimension dk, and values of dimension dv. We compute the dot products of the
+query with all keys, divide each by √dk, and apply a softmax function to obtain the weights on the
+values.
+In practice, we compute the attention function on a set of queries simultaneously, packed together
+into a matrix Q. The keys and values are also packed together into matrices K and V . We compute
+the matrix of outputs as:
+Attention(Q, K, V ) = softmax(QKT
+√dk
+)V
+(1)
+The two most commonly used attention functions are additive attention [2], and dot-product (multi-
+plicative) attention. Dot-product attention is identical to our algorithm, except for the scaling factor
+of
+1
+√dk . Additive attention computes the compatibility function using a feed-forward network with
+a single hidden layer. While the two are similar in theoretical complexity, dot-product attention is
+much faster and more space-efficient in practice, since it can be implemented using highly optimized
+matrix multiplication code.
+While for small values of dk the two mechanisms perform similarly, additive attention outperforms
+dot product attention without scaling for larger values of dk [3]. We suspect that for large values of
+dk, the dot products grow large in magnitude, pushing the softmax function into regions where it has
+extremely small gradients 4. To counteract this effect, we scale the dot products by
+1
+√dk .
+3.2.2
+Multi-Head Attention
+Instead of performing a single attention function with dmodel-dimensional keys, values and queries,
+we found it beneficial to linearly project the queries, keys and values h times with different, learned
+linear projections to dk, dk and dv dimensions, respectively. On each of these projected versions of
+queries, keys and values we then perform the attention function in parallel, yielding dv-dimensional
+4To illustrate why the dot products get large, assume that the components of q and k are independent random
+variables with mean 0 and variance 1. Then their dot product, q · k = Pdk
+i=1 qiki, has mean 0 and varianc
+==========================================================================================
+QUESTION 25: How does the computational complexity of self-attention compare with that of recurrent layers?
+EXPECTED SOURCE: 1706.03762v7.txt
+EXPECTED PDF PAGES: [6]
+----------------------------------------------------------------------
+PDF PAGE 6
+Table 1: Maximum path lengths, per-layer complexity and minimum number of sequential operations
+for different layer types. n is the sequence length, d is the representation dimension, k is the kernel
+size of convolutions and r the size of the neighborhood in restricted self-attention.
+Layer Type
+Complexity per Layer
+Sequential
+Maximum Path Length
+Operations
+Self-Attention
+O(n2 · d)
+O(1)
+O(1)
+Recurrent
+O(n · d2)
+O(n)
+O(n)
+Convolutional
+O(k · n · d2)
+O(1)
+O(logk(n))
+Self-Attention (restricted)
+O(r · n · d)
+O(1)
+O(n/r)
+3.5
+Positional Encoding
+Since our model contains no recurrence and no convolution, in order for the model to make use of the
+order of the sequence, we must inject some information about the relative or absolute position of the
+tokens in the sequence. To this end, we add "positional encodings" to the input embeddings at the
+bottoms of the encoder and decoder stacks. The positional encodings have the same dimension dmodel
+as the embeddings, so that the two can be summed. There are many choices of positional encodings,
+learned and fixed [9].
+In this work, we use sine and cosine functions of different frequencies:
+PE(pos,2i) = sin(pos/100002i/dmodel)
+PE(pos,2i+1) = cos(pos/100002i/dmodel)
+where pos is the position and i is the dimension. That is, each dimension of the positional encoding
+corresponds to a sinusoid. The wavelengths form a geometric progression from 2π to 10000 · 2π. We
+chose this function because we hypothesized it would allow the model to easily learn to attend by
+relative positions, since for any fixed offset k, PEpos+k can be represented as a linear function of
+PEpos.
+We also experimented with using learned positional embeddings [9] instead, and found that the two
+versions produced nearly identical results (see Table 3 row (E)). We chose the sinusoidal version
+because it may allow the model to extrapolate to sequence lengths longer than the ones encountered
+during training.
+4
+Why Self-Attention
+In this section we compare various aspects of self-attention layers to the recurrent and convolu-
+tional layers commonly used for mapping one variable-length sequence of symbol representations
+(x1, ..., xn) to another sequence of equal length (z1, ..., zn), with xi, zi ∈Rd, such as a hidden
+layer in a typical sequence transduction encoder or decoder. Motivating our use of self-attention we
+consider three desiderata.
+One is the total computational complexity per layer. Another is the amount of computation that can
+be parallelized, as measure
+==========================================================================================
+QUESTION 26: What is the open-domain question-answering problem?
+EXPECTED SOURCE: 2020.emnlp-main.550.txt
+EXPECTED PDF PAGES: [2]
+----------------------------------------------------------------------
+PDF PAGE 2
+6770
+QA datasets, it also suffers from two weaknesses.
+First, ICT pretraining is computationally intensive
+and it is not completely clear that regular sentences
+are good surrogates of questions in the objective
+function. Second, because the context encoder is
+not ﬁne-tuned using pairs of questions and answers,
+the corresponding representations could be subop-
+timal.
+In this paper, we address the question: can we
+train a better dense embedding model using only
+pairs of questions and passages (or answers), with-
+out additional pretraining? By leveraging the now
+standard BERT pretrained model (Devlin et al.,
+2019) and a dual-encoder architecture (Bromley
+et al., 1994), we focus on developing the right
+training scheme using a relatively small number
+of question and passage pairs. Through a series
+of careful ablation studies, our ﬁnal solution is
+surprisingly simple: the embedding is optimized
+for maximizing inner products of the question and
+relevant passage vectors, with an objective compar-
+ing all pairs of questions and passages in a batch.
+Our Dense Passage Retriever (DPR) is exception-
+ally strong. It not only outperforms BM25 by a
+large margin (65.2% vs. 42.9% in Top-5 accuracy),
+but also results in a substantial improvement on
+the end-to-end QA accuracy compared to ORQA
+(41.5% vs. 33.3%) in the open Natural Questions
+setting (Lee et al., 2019; Kwiatkowski et al., 2019).
+Our contributions are twofold. First, we demon-
+strate that with the proper training setup, sim-
+ply ﬁne-tuning the question and passage encoders
+on existing question-passage pairs is sufﬁcient to
+greatly outperform BM25. Our empirical results
+also suggest that additional pretraining may not be
+needed. Second, we verify that, in the context of
+open-domain question answering, a higher retrieval
+precision indeed translates to a higher end-to-end
+QA accuracy. By applying a modern reader model
+to the top retrieved passages, we achieve compara-
+ble or better results on multiple QA datasets in the
+open-retrieval setting, compared to several, much
+complicated systems.
+2
+Background
+The problem of open-domain QA studied in this
+paper can be described as follows. Given a factoid
+question, such as “Who ﬁrst voiced Meg on Family
+Guy?” or “Where was the 8th Dalai Lama born?”, a
+system is required to answer it using a large corpus
+of diversiﬁed topics. More speciﬁcally, we assume
+the extractive QA setting, in which the answer is
+restricted to a span appearing in one or more pas-
+sages in the corpus. A
+==========================================================================================
+QUESTION 27: Which traditional retrieval methods are commonly used in open-domain question answering?
+EXPECTED SOURCE: 2020.emnlp-main.550.txt
+EXPECTED PDF PAGES: [1]
+----------------------------------------------------------------------
+PDF PAGE 1
+Proceedings of the 2020 Conference on Empirical Methods in Natural Language Processing, pages 6769–6781,
+November 16–20, 2020. c⃝2020 Association for Computational Linguistics
+6769
+Dense Passage Retrieval for Open-Domain Question Answering
+Vladimir Karpukhin∗, Barlas O˘guz∗, Sewon Min†, Patrick Lewis,
+Ledell Wu, Sergey Edunov, Danqi Chen‡, Wen-tau Yih
+Facebook AI
+†University of Washington
+‡Princeton University
+{vladk, barlaso, plewis, ledell, edunov, scottyih}@fb.com
+sewon@cs.washington.edu
+danqic@cs.princeton.edu
+Abstract
+Open-domain question answering relies on ef-
+ﬁcient passage retrieval to select candidate
+contexts, where traditional sparse vector space
+models, such as TF-IDF or BM25, are the de
+facto method.
+In this work, we show that
+retrieval can be practically implemented us-
+ing dense representations alone, where em-
+beddings are learned from a small number
+of questions and passages by a simple dual-
+encoder framework.
+When evaluated on a
+wide range of open-domain QA datasets, our
+dense retriever outperforms a strong Lucene-
+BM25 system greatly by 9%-19% absolute in
+terms of top-20 passage retrieval accuracy, and
+helps our end-to-end QA system establish new
+state-of-the-art on multiple open-domain QA
+benchmarks.1
+1
+Introduction
+Open-domain question answering (QA) (Voorhees,
+1999) is a task that answers factoid questions us-
+ing a large collection of documents. While early
+QA systems are often complicated and consist of
+multiple components (Ferrucci (2012); Moldovan
+et al. (2003), inter alia), the advances of reading
+comprehension models suggest a much simpliﬁed
+two-stage framework: (1) a context retriever ﬁrst
+selects a small subset of passages where some
+of them contain the answer to the question, and
+then (2) a machine reader can thoroughly exam-
+ine the retrieved contexts and identify the correct
+answer (Chen et al., 2017). Although reducing
+open-domain QA to machine reading is a very rea-
+sonable strategy, a huge performance degradation
+is often observed in practice2, indicating the needs
+of improving retrieval.
+∗Equal contribution
+1The code and trained models have been released at
+https://github.com/facebookresearch/DPR.
+2For instance, the exact match score on SQuAD v1.1 drops
+from above 80% to less than 40% (Yang et al., 2019a).
+Retrieval in open-domain QA is usually imple-
+mented using TF-IDF or BM25 (Robertson and
+Zaragoza, 2009), which matches keywords efﬁ-
+ciently with an inverted index and can be seen
+as representing the question and c
+==========================================================================================
+QUESTION 28: How does DPR use a dual-encoder architecture?
+EXPECTED SOURCE: 2020.emnlp-main.550.txt
+EXPECTED PDF PAGES: [2]
+----------------------------------------------------------------------
+PDF PAGE 2
+6770
+QA datasets, it also suffers from two weaknesses.
+First, ICT pretraining is computationally intensive
+and it is not completely clear that regular sentences
+are good surrogates of questions in the objective
+function. Second, because the context encoder is
+not ﬁne-tuned using pairs of questions and answers,
+the corresponding representations could be subop-
+timal.
+In this paper, we address the question: can we
+train a better dense embedding model using only
+pairs of questions and passages (or answers), with-
+out additional pretraining? By leveraging the now
+standard BERT pretrained model (Devlin et al.,
+2019) and a dual-encoder architecture (Bromley
+et al., 1994), we focus on developing the right
+training scheme using a relatively small number
+of question and passage pairs. Through a series
+of careful ablation studies, our ﬁnal solution is
+surprisingly simple: the embedding is optimized
+for maximizing inner products of the question and
+relevant passage vectors, with an objective compar-
+ing all pairs of questions and passages in a batch.
+Our Dense Passage Retriever (DPR) is exception-
+ally strong. It not only outperforms BM25 by a
+large margin (65.2% vs. 42.9% in Top-5 accuracy),
+but also results in a substantial improvement on
+the end-to-end QA accuracy compared to ORQA
+(41.5% vs. 33.3%) in the open Natural Questions
+setting (Lee et al., 2019; Kwiatkowski et al., 2019).
+Our contributions are twofold. First, we demon-
+strate that with the proper training setup, sim-
+ply ﬁne-tuning the question and passage encoders
+on existing question-passage pairs is sufﬁcient to
+greatly outperform BM25. Our empirical results
+also suggest that additional pretraining may not be
+needed. Second, we verify that, in the context of
+open-domain question answering, a higher retrieval
+precision indeed translates to a higher end-to-end
+QA accuracy. By applying a modern reader model
+to the top retrieved passages, we achieve compara-
+ble or better results on multiple QA datasets in the
+open-retrieval setting, compared to several, much
+complicated systems.
+2
+Background
+The problem of open-domain QA studied in this
+paper can be described as follows. Given a factoid
+question, such as “Who ﬁrst voiced Meg on Family
+Guy?” or “Where was the 8th Dalai Lama born?”, a
+system is required to answer it using a large corpus
+of diversiﬁed topics. More speciﬁcally, we assume
+the extractive QA setting, in which the answer is
+restricted to a span appearing in one or more pas-
+sages in the corpus. A
+==========================================================================================
+QUESTION 29: How are question and passage representations compared in DPR?
+EXPECTED SOURCE: 2020.emnlp-main.550.txt
+EXPECTED PDF PAGES: [3]
+----------------------------------------------------------------------
+PDF PAGE 3
+6771
+At run-time, DPR applies a different encoder EQ(·)
+that maps the input question to a d-dimensional
+vector, and retrieves k passages of which vectors
+are the closest to the question vector. We deﬁne
+the similarity between the question and the passage
+using the dot product of their vectors:
+sim(q, p) = EQ(q)⊺EP (p).
+(1)
+Although more expressive model forms for measur-
+ing the similarity between a question and a passage
+do exist, such as networks consisting of multiple
+layers of cross attentions, the similarity function
+needs to be decomposable so that the represen-
+tations of the collection of passages can be pre-
+computed. Most decomposable similarity functions
+are some transformations of Euclidean distance
+(L2). For instance, cosine is equivalent to inner
+product for unit vectors and the Mahalanobis dis-
+tance is equivalent to L2 distance in a transformed
+space. Inner product search has been widely used
+and studied, as well as its connection to cosine
+similarity and L2 distance (Mussmann and Ermon,
+2016; Ram and Gray, 2012). As our ablation study
+ﬁnds other similarity functions perform compara-
+bly (Section 5.2; Appendix B), we thus choose
+the simpler inner product function and improve the
+dense passage retriever by learning better encoders.
+Encoders
+Although in principle the question and
+passage encoders can be implemented by any neu-
+ral networks, in this work we use two independent
+BERT (Devlin et al., 2019) networks (base, un-
+cased) and take the representation at the [CLS]
+token as the output, so d = 768.
+Inference
+During inference time, we apply the
+passage encoder EP to all the passages and index
+them using FAISS (Johnson et al., 2017) ofﬂine.
+FAISS is an extremely efﬁcient, open-source li-
+brary for similarity search and clustering of dense
+vectors, which can easily be applied to billions of
+vectors. Given a question q at run-time, we derive
+its embedding vq = EQ(q) and retrieve the top k
+passages with embeddings closest to vq.
+3.2
+Training
+Training the encoders so that the dot-product sim-
+ilarity (Eq. (1)) becomes a good ranking function
+for retrieval is essentially a metric learning prob-
+lem (Kulis, 2013). The goal is to create a vector
+space such that relevant pairs of questions and pas-
+sages will have smaller distance (i.e., higher simi-
+larity) than the irrelevant ones, by learning a better
+embedding function.
+Let D = {⟨qi, p+
+i , p−
+i,1, · · · , p−
+i,n⟩}m
+i=1 be the
+training data that consists of m instances. Each
+instance contains on
+==========================================================================================
+QUESTION 30: How is DPR trained using question-passage pairs?
+EXPECTED SOURCE: 2020.emnlp-main.550.txt
+EXPECTED PDF PAGES: [2]
+----------------------------------------------------------------------
+PDF PAGE 2
+6770
+QA datasets, it also suffers from two weaknesses.
+First, ICT pretraining is computationally intensive
+and it is not completely clear that regular sentences
+are good surrogates of questions in the objective
+function. Second, because the context encoder is
+not ﬁne-tuned using pairs of questions and answers,
+the corresponding representations could be subop-
+timal.
+In this paper, we address the question: can we
+train a better dense embedding model using only
+pairs of questions and passages (or answers), with-
+out additional pretraining? By leveraging the now
+standard BERT pretrained model (Devlin et al.,
+2019) and a dual-encoder architecture (Bromley
+et al., 1994), we focus on developing the right
+training scheme using a relatively small number
+of question and passage pairs. Through a series
+of careful ablation studies, our ﬁnal solution is
+surprisingly simple: the embedding is optimized
+for maximizing inner products of the question and
+relevant passage vectors, with an objective compar-
+ing all pairs of questions and passages in a batch.
+Our Dense Passage Retriever (DPR) is exception-
+ally strong. It not only outperforms BM25 by a
+large margin (65.2% vs. 42.9% in Top-5 accuracy),
+but also results in a substantial improvement on
+the end-to-end QA accuracy compared to ORQA
+(41.5% vs. 33.3%) in the open Natural Questions
+setting (Lee et al., 2019; Kwiatkowski et al., 2019).
+Our contributions are twofold. First, we demon-
+strate that with the proper training setup, sim-
+ply ﬁne-tuning the question and passage encoders
+on existing question-passage pairs is sufﬁcient to
+greatly outperform BM25. Our empirical results
+also suggest that additional pretraining may not be
+needed. Second, we verify that, in the context of
+open-domain question answering, a higher retrieval
+precision indeed translates to a higher end-to-end
+QA accuracy. By applying a modern reader model
+to the top retrieved passages, we achieve compara-
+ble or better results on multiple QA datasets in the
+open-retrieval setting, compared to several, much
+complicated systems.
+2
+Background
+The problem of open-domain QA studied in this
+paper can be described as follows. Given a factoid
+question, such as “Who ﬁrst voiced Meg on Family
+Guy?” or “Where was the 8th Dalai Lama born?”, a
+system is required to answer it using a large corpus
+of diversiﬁed topics. More speciﬁcally, we assume
+the extractive QA setting, in which the answer is
+restricted to a span appearing in one or more pas-
+sages in the corpus. A
+==========================================================================================
+QUESTION 31: What is the role of hard negative passages during DPR training?
+EXPECTED SOURCE: 2020.emnlp-main.550.txt
+EXPECTED PDF PAGES: [3, 4]
+----------------------------------------------------------------------
+PDF PAGE 3
+6771
+At run-time, DPR applies a different encoder EQ(·)
+that maps the input question to a d-dimensional
+vector, and retrieves k passages of which vectors
+are the closest to the question vector. We deﬁne
+the similarity between the question and the passage
+using the dot product of their vectors:
+sim(q, p) = EQ(q)⊺EP (p).
+(1)
+Although more expressive model forms for measur-
+ing the similarity between a question and a passage
+do exist, such as networks consisting of multiple
+layers of cross attentions, the similarity function
+needs to be decomposable so that the represen-
+tations of the collection of passages can be pre-
+computed. Most decomposable similarity functions
+are some transformations of Euclidean distance
+(L2). For instance, cosine is equivalent to inner
+product for unit vectors and the Mahalanobis dis-
+tance is equivalent to L2 distance in a transformed
+space. Inner product search has been widely used
+and studied, as well as its connection to cosine
+similarity and L2 distance (Mussmann and Ermon,
+2016; Ram and Gray, 2012). As our ablation study
+ﬁnds other similarity functions perform compara-
+bly (Section 5.2; Appendix B), we thus choose
+the simpler inner product function and improve the
+dense passage retriever by learning better encoders.
+Encoders
+Although in principle the question and
+passage encoders can be implemented by any neu-
+ral networks, in this work we use two independent
+BERT (Devlin et al., 2019) networks (base, un-
+cased) and take the representation at the [CLS]
+token as the output, so d = 768.
+Inference
+During inference time, we apply the
+passage encoder EP to all the passages and index
+them using FAISS (Johnson et al., 2017) ofﬂine.
+FAISS is an extremely efﬁcient, open-source li-
+brary for similarity search and clustering of dense
+vectors, which can easily be applied to billions of
+vectors. Given a question q at run-time, we derive
+its embedding vq = EQ(q) and retrieve the top k
+passages with embeddings closest to vq.
+3.2
+Training
+Training the encoders so that the dot-product sim-
+ilarity (Eq. (1)) becomes a good ranking function
+for retrieval is essentially a metric learning prob-
+lem (Kulis, 2013). The goal is to create a vector
+space such that relevant pairs of questions and pas-
+sages will have smaller distance (i.e., higher simi-
+larity) than the irrelevant ones, by learning a better
+embedding function.
+Let D = {⟨qi, p+
+i , p−
+i,1, · · · , p−
+i,n⟩}m
+i=1 be the
+training data that consists of m instances. Each
+instance contains on
+----------------------------------------------------------------------
+PDF PAGE 4
+6772
+negative passages for each question.
+The trick of in-batch negatives has been used in
+the full batch setting (Yih et al., 2011) and more
+recently for mini-batch (Henderson et al., 2017;
+Gillick et al., 2019). It has been shown to be an
+effective strategy for learning a dual-encoder model
+that boosts the number of training examples.
+4
+Experimental Setup
+In this section, we describe the data we used for
+experiments and the basic setup.
+4.1
+Wikipedia Data Pre-processing
+Following (Lee et al., 2019), we use the English
+Wikipedia dump from Dec. 20, 2018 as the source
+documents for answering questions. We ﬁrst apply
+the pre-processing code released in DrQA (Chen
+et al., 2017) to extract the clean, text-portion of
+articles from the Wikipedia dump. This step re-
+moves semi-structured data, such as tables, info-
+boxes, lists, as well as the disambiguation pages.
+We then split each article into multiple, disjoint text
+blocks of 100 words as passages, serving as our
+basic retrieval units, following (Wang et al., 2019),
+which results in 21,015,324 passages in the end.5
+Each passage is also prepended with the title of the
+Wikipedia article where the passage is from, along
+with an [SEP] token.
+4.2
+Question Answering Datasets
+We use the same ﬁve QA datasets and train-
+ing/dev/testing splitting method as in previous
+work (Lee et al., 2019). Below we brieﬂy describe
+each dataset and refer readers to their paper for the
+details of data preparation.
+Natural Questions (NQ) (Kwiatkowski et al.,
+2019) was designed for end-to-end question an-
+swering.
+The questions were mined from real
+Google search queries and the answers were spans
+in Wikipedia articles identiﬁed by annotators.
+TriviaQA (Joshi et al., 2017) contains a set of trivia
+questions with answers that were originally scraped
+from the Web.
+WebQuestions (WQ) (Berant et al., 2013) consists
+of questions selected using Google Suggest API,
+where the answers are entities in Freebase.
+CuratedTREC (TREC) (Baudiˇs and ˇSediv`y,
+2015) sources questions from TREC QA tracks
+5However, Wang et al. (2019) also propose splitting docu-
+ments into overlapping passages, which we do not ﬁnd advan-
+tageous compared to the non-overlapping version.
+Dataset
+Train
+Dev
+Test
+Natural Questions
+79,168
+58,880
+8,757
+3,610
+TriviaQA
+78,785
+60,413
+8,837
+11,313
+WebQuestions
+3,417
+2,474
+361
+2,032
+CuratedTREC
+1,353
+1,125
+133
+694
+SQuAD
+78,713
+70,096
+8,886
+10,570
+Table 1: Number of questions in each QA dataset. The
+two columns of Train denote the origin
+==========================================================================================
+QUESTION 32: How does DPR select candidate passages from a large document corpus?
+EXPECTED SOURCE: 2020.emnlp-main.550.txt
+EXPECTED PDF PAGES: [3]
+----------------------------------------------------------------------
+PDF PAGE 3
+6771
+At run-time, DPR applies a different encoder EQ(·)
+that maps the input question to a d-dimensional
+vector, and retrieves k passages of which vectors
+are the closest to the question vector. We deﬁne
+the similarity between the question and the passage
+using the dot product of their vectors:
+sim(q, p) = EQ(q)⊺EP (p).
+(1)
+Although more expressive model forms for measur-
+ing the similarity between a question and a passage
+do exist, such as networks consisting of multiple
+layers of cross attentions, the similarity function
+needs to be decomposable so that the represen-
+tations of the collection of passages can be pre-
+computed. Most decomposable similarity functions
+are some transformations of Euclidean distance
+(L2). For instance, cosine is equivalent to inner
+product for unit vectors and the Mahalanobis dis-
+tance is equivalent to L2 distance in a transformed
+space. Inner product search has been widely used
+and studied, as well as its connection to cosine
+similarity and L2 distance (Mussmann and Ermon,
+2016; Ram and Gray, 2012). As our ablation study
+ﬁnds other similarity functions perform compara-
+bly (Section 5.2; Appendix B), we thus choose
+the simpler inner product function and improve the
+dense passage retriever by learning better encoders.
+Encoders
+Although in principle the question and
+passage encoders can be implemented by any neu-
+ral networks, in this work we use two independent
+BERT (Devlin et al., 2019) networks (base, un-
+cased) and take the representation at the [CLS]
+token as the output, so d = 768.
+Inference
+During inference time, we apply the
+passage encoder EP to all the passages and index
+them using FAISS (Johnson et al., 2017) ofﬂine.
+FAISS is an extremely efﬁcient, open-source li-
+brary for similarity search and clustering of dense
+vectors, which can easily be applied to billions of
+vectors. Given a question q at run-time, we derive
+its embedding vq = EQ(q) and retrieve the top k
+passages with embeddings closest to vq.
+3.2
+Training
+Training the encoders so that the dot-product sim-
+ilarity (Eq. (1)) becomes a good ranking function
+for retrieval is essentially a metric learning prob-
+lem (Kulis, 2013). The goal is to create a vector
+space such that relevant pairs of questions and pas-
+sages will have smaller distance (i.e., higher simi-
+larity) than the irrelevant ones, by learning a better
+embedding function.
+Let D = {⟨qi, p+
+i , p−
+i,1, · · · , p−
+i,n⟩}m
+i=1 be the
+training data that consists of m instances. Each
+instance contains on
+==========================================================================================
+QUESTION 33: What retrieval accuracy measure does the DPR paper report for its top-20 passages?
+EXPECTED SOURCE: 2020.emnlp-main.550.txt
+EXPECTED PDF PAGES: [1]
+----------------------------------------------------------------------
+PDF PAGE 1
+Proceedings of the 2020 Conference on Empirical Methods in Natural Language Processing, pages 6769–6781,
+November 16–20, 2020. c⃝2020 Association for Computational Linguistics
+6769
+Dense Passage Retrieval for Open-Domain Question Answering
+Vladimir Karpukhin∗, Barlas O˘guz∗, Sewon Min†, Patrick Lewis,
+Ledell Wu, Sergey Edunov, Danqi Chen‡, Wen-tau Yih
+Facebook AI
+†University of Washington
+‡Princeton University
+{vladk, barlaso, plewis, ledell, edunov, scottyih}@fb.com
+sewon@cs.washington.edu
+danqic@cs.princeton.edu
+Abstract
+Open-domain question answering relies on ef-
+ﬁcient passage retrieval to select candidate
+contexts, where traditional sparse vector space
+models, such as TF-IDF or BM25, are the de
+facto method.
+In this work, we show that
+retrieval can be practically implemented us-
+ing dense representations alone, where em-
+beddings are learned from a small number
+of questions and passages by a simple dual-
+encoder framework.
+When evaluated on a
+wide range of open-domain QA datasets, our
+dense retriever outperforms a strong Lucene-
+BM25 system greatly by 9%-19% absolute in
+terms of top-20 passage retrieval accuracy, and
+helps our end-to-end QA system establish new
+state-of-the-art on multiple open-domain QA
+benchmarks.1
+1
+Introduction
+Open-domain question answering (QA) (Voorhees,
+1999) is a task that answers factoid questions us-
+ing a large collection of documents. While early
+QA systems are often complicated and consist of
+multiple components (Ferrucci (2012); Moldovan
+et al. (2003), inter alia), the advances of reading
+comprehension models suggest a much simpliﬁed
+two-stage framework: (1) a context retriever ﬁrst
+selects a small subset of passages where some
+of them contain the answer to the question, and
+then (2) a machine reader can thoroughly exam-
+ine the retrieved contexts and identify the correct
+answer (Chen et al., 2017). Although reducing
+open-domain QA to machine reading is a very rea-
+sonable strategy, a huge performance degradation
+is often observed in practice2, indicating the needs
+of improving retrieval.
+∗Equal contribution
+1The code and trained models have been released at
+https://github.com/facebookresearch/DPR.
+2For instance, the exact match score on SQuAD v1.1 drops
+from above 80% to less than 40% (Yang et al., 2019a).
+Retrieval in open-domain QA is usually imple-
+mented using TF-IDF or BM25 (Robertson and
+Zaragoza, 2009), which matches keywords efﬁ-
+ciently with an inverted index and can be seen
+as representing the question and c
+==========================================================================================
+QUESTION 34: How does DPR perform compared with BM25 in the reported experiments?
+EXPECTED SOURCE: 2020.emnlp-main.550.txt
+EXPECTED PDF PAGES: [1]
+----------------------------------------------------------------------
+PDF PAGE 1
+Proceedings of the 2020 Conference on Empirical Methods in Natural Language Processing, pages 6769–6781,
+November 16–20, 2020. c⃝2020 Association for Computational Linguistics
+6769
+Dense Passage Retrieval for Open-Domain Question Answering
+Vladimir Karpukhin∗, Barlas O˘guz∗, Sewon Min†, Patrick Lewis,
+Ledell Wu, Sergey Edunov, Danqi Chen‡, Wen-tau Yih
+Facebook AI
+†University of Washington
+‡Princeton University
+{vladk, barlaso, plewis, ledell, edunov, scottyih}@fb.com
+sewon@cs.washington.edu
+danqic@cs.princeton.edu
+Abstract
+Open-domain question answering relies on ef-
+ﬁcient passage retrieval to select candidate
+contexts, where traditional sparse vector space
+models, such as TF-IDF or BM25, are the de
+facto method.
+In this work, we show that
+retrieval can be practically implemented us-
+ing dense representations alone, where em-
+beddings are learned from a small number
+of questions and passages by a simple dual-
+encoder framework.
+When evaluated on a
+wide range of open-domain QA datasets, our
+dense retriever outperforms a strong Lucene-
+BM25 system greatly by 9%-19% absolute in
+terms of top-20 passage retrieval accuracy, and
+helps our end-to-end QA system establish new
+state-of-the-art on multiple open-domain QA
+benchmarks.1
+1
+Introduction
+Open-domain question answering (QA) (Voorhees,
+1999) is a task that answers factoid questions us-
+ing a large collection of documents. While early
+QA systems are often complicated and consist of
+multiple components (Ferrucci (2012); Moldovan
+et al. (2003), inter alia), the advances of reading
+comprehension models suggest a much simpliﬁed
+two-stage framework: (1) a context retriever ﬁrst
+selects a small subset of passages where some
+of them contain the answer to the question, and
+then (2) a machine reader can thoroughly exam-
+ine the retrieved contexts and identify the correct
+answer (Chen et al., 2017). Although reducing
+open-domain QA to machine reading is a very rea-
+sonable strategy, a huge performance degradation
+is often observed in practice2, indicating the needs
+of improving retrieval.
+∗Equal contribution
+1The code and trained models have been released at
+https://github.com/facebookresearch/DPR.
+2For instance, the exact match score on SQuAD v1.1 drops
+from above 80% to less than 40% (Yang et al., 2019a).
+Retrieval in open-domain QA is usually imple-
+mented using TF-IDF or BM25 (Robertson and
+Zaragoza, 2009), which matches keywords efﬁ-
+ciently with an inverted index and can be seen
+as representing the question and c
+==========================================================================================
+QUESTION 35: How does DPR use learned dense representations to retrieve passages relevant to a question?
+EXPECTED SOURCE: 2020.emnlp-main.550.txt
+EXPECTED PDF PAGES: [1]
+----------------------------------------------------------------------
+PDF PAGE 1
+Proceedings of the 2020 Conference on Empirical Methods in Natural Language Processing, pages 6769–6781,
+November 16–20, 2020. c⃝2020 Association for Computational Linguistics
+6769
+Dense Passage Retrieval for Open-Domain Question Answering
+Vladimir Karpukhin∗, Barlas O˘guz∗, Sewon Min†, Patrick Lewis,
+Ledell Wu, Sergey Edunov, Danqi Chen‡, Wen-tau Yih
+Facebook AI
+†University of Washington
+‡Princeton University
+{vladk, barlaso, plewis, ledell, edunov, scottyih}@fb.com
+sewon@cs.washington.edu
+danqic@cs.princeton.edu
+Abstract
+Open-domain question answering relies on ef-
+ﬁcient passage retrieval to select candidate
+contexts, where traditional sparse vector space
+models, such as TF-IDF or BM25, are the de
+facto method.
+In this work, we show that
+retrieval can be practically implemented us-
+ing dense representations alone, where em-
+beddings are learned from a small number
+of questions and passages by a simple dual-
+encoder framework.
+When evaluated on a
+wide range of open-domain QA datasets, our
+dense retriever outperforms a strong Lucene-
+BM25 system greatly by 9%-19% absolute in
+terms of top-20 passage retrieval accuracy, and
+helps our end-to-end QA system establish new
+state-of-the-art on multiple open-domain QA
+benchmarks.1
+1
+Introduction
+Open-domain question answering (QA) (Voorhees,
+1999) is a task that answers factoid questions us-
+ing a large collection of documents. While early
+QA systems are often complicated and consist of
+multiple components (Ferrucci (2012); Moldovan
+et al. (2003), inter alia), the advances of reading
+comprehension models suggest a much simpliﬁed
+two-stage framework: (1) a context retriever ﬁrst
+selects a small subset of passages where some
+of them contain the answer to the question, and
+then (2) a machine reader can thoroughly exam-
+ine the retrieved contexts and identify the correct
+answer (Chen et al., 2017). Although reducing
+open-domain QA to machine reading is a very rea-
+sonable strategy, a huge performance degradation
+is often observed in practice2, indicating the needs
+of improving retrieval.
+∗Equal contribution
+1The code and trained models have been released at
+https://github.com/facebookresearch/DPR.
+2For instance, the exact match score on SQuAD v1.1 drops
+from above 80% to less than 40% (Yang et al., 2019a).
+Retrieval in open-domain QA is usually imple-
+mented using TF-IDF or BM25 (Robertson and
+Zaragoza, 2009), which matches keywords efﬁ-
+ciently with an inverted index and can be seen
+as representing the question and c
+==========================================================================================
+QUESTION 36: What limitations of parametric language-model knowledge motivate the use of RAG?
+EXPECTED SOURCE: 2005.11401v4.txt
+EXPECTED PDF PAGES: [1]
+----------------------------------------------------------------------
+PDF PAGE 1
+Retrieval-Augmented Generation for
+Knowledge-Intensive NLP Tasks
+Patrick Lewis†‡, Ethan Perez⋆,
+Aleksandra Piktus†, Fabio Petroni†, Vladimir Karpukhin†, Naman Goyal†, Heinrich Küttler†,
+Mike Lewis†, Wen-tau Yih†, Tim Rocktäschel†‡, Sebastian Riedel†‡, Douwe Kiela†
+†Facebook AI Research; ‡University College London; ⋆New York University;
+plewis@fb.com
+Abstract
+Large pre-trained language models have been shown to store factual knowledge
+in their parameters, and achieve state-of-the-art results when ﬁne-tuned on down-
+stream NLP tasks. However, their ability to access and precisely manipulate knowl-
+edge is still limited, and hence on knowledge-intensive tasks, their performance
+lags behind task-speciﬁc architectures. Additionally, providing provenance for their
+decisions and updating their world knowledge remain open research problems. Pre-
+trained models with a differentiable access mechanism to explicit non-parametric
+memory have so far been only investigated for extractive downstream tasks. We
+explore a general-purpose ﬁne-tuning recipe for retrieval-augmented generation
+(RAG) — models which combine pre-trained parametric and non-parametric mem-
+ory for language generation. We introduce RAG models where the parametric
+memory is a pre-trained seq2seq model and the non-parametric memory is a dense
+vector index of Wikipedia, accessed with a pre-trained neural retriever. We com-
+pare two RAG formulations, one which conditions on the same retrieved passages
+across the whole generated sequence, and another which can use different passages
+per token. We ﬁne-tune and evaluate our models on a wide range of knowledge-
+intensive NLP tasks and set the state of the art on three open domain QA tasks,
+outperforming parametric seq2seq models and task-speciﬁc retrieve-and-extract
+architectures. For language generation tasks, we ﬁnd that RAG models generate
+more speciﬁc, diverse and factual language than a state-of-the-art parametric-only
+seq2seq baseline.
+1
+Introduction
+Pre-trained neural language models have been shown to learn a substantial amount of in-depth knowl-
+edge from data [47]. They can do so without any access to an external memory, as a parameterized
+implicit knowledge base [51, 52]. While this development is exciting, such models do have down-
+sides: They cannot easily expand or revise their memory, can’t straightforwardly provide insight into
+their predictions, and may produce “hallucinations” [38]. Hybrid models that combine parametric
+memory with non-param
+==========================================================================================
+QUESTION 37: What are the main components of the RAG architecture?
+EXPECTED SOURCE: 2005.11401v4.txt
+EXPECTED PDF PAGES: [2]
+----------------------------------------------------------------------
+PDF PAGE 2
+The Divine
+Comedy (x)
+q
+Query
+Encoder
+q(x)
+MIPS
+pθ
+Generator pθ
+(Parametric)
+Margin-
+alize
+This 14th century work
+is divided into 3
+sections: "Inferno",
+"Purgatorio" &
+"Paradiso"         (y)
+End-to-End Backprop through q and pθ
+Barack Obama was
+born in Hawaii.(x)
+Fact Veriﬁcation: Fact Query
+supports (y)
+Question Generation
+Fact Veriﬁcation:
+Label Generation
+Document
+Index
+Define "middle ear"(x)
+Question Answering:
+Question Query
+The middle ear includes
+the tympanic cavity and
+the three ossicles.  (y)
+Question Answering:
+Answer Generation
+Retriever pη
+(Non-Parametric)
+z4
+z3
+z2
+z1
+d(z)
+Jeopardy Question
+Generation:
+Answer Query
+Figure 1: Overview of our approach. We combine a pre-trained retriever (Query Encoder + Document
+Index) with a pre-trained seq2seq model (Generator) and ﬁne-tune end-to-end. For query x, we use
+Maximum Inner Product Search (MIPS) to ﬁnd the top-K documents zi. For ﬁnal prediction y, we
+treat z as a latent variable and marginalize over seq2seq predictions given different documents.
+but have only explored open-domain extractive question answering. Here, we bring hybrid parametric
+and non-parametric memory to the “workhorse of NLP,” i.e. sequence-to-sequence (seq2seq) models.
+We endow pre-trained, parametric-memory generation models with a non-parametric memory through
+a general-purpose ﬁne-tuning approach which we refer to as retrieval-augmented generation (RAG).
+We build RAG models where the parametric memory is a pre-trained seq2seq transformer, and the
+non-parametric memory is a dense vector index of Wikipedia, accessed with a pre-trained neural
+retriever. We combine these components in a probabilistic model trained end-to-end (Fig. 1). The
+retriever (Dense Passage Retriever [26], henceforth DPR) provides latent documents conditioned on
+the input, and the seq2seq model (BART [32]) then conditions on these latent documents together with
+the input to generate the output. We marginalize the latent documents with a top-K approximation,
+either on a per-output basis (assuming the same document is responsible for all tokens) or a per-token
+basis (where different documents are responsible for different tokens). Like T5 [51] or BART, RAG
+can be ﬁne-tuned on any seq2seq task, whereby both the generator and retriever are jointly learned.
+There has been extensive previous work proposing architectures to enrich systems with non-parametric
+memory which are trained from scratch for speciﬁc tasks, e.g. memory networks [64, 55], stack-
+augmented net
+==========================================================================================
+QUESTION 38: What is the role of the retriever in RAG?
+EXPECTED SOURCE: 2005.11401v4.txt
+EXPECTED PDF PAGES: [2]
+----------------------------------------------------------------------
+PDF PAGE 2
+The Divine
+Comedy (x)
+q
+Query
+Encoder
+q(x)
+MIPS
+pθ
+Generator pθ
+(Parametric)
+Margin-
+alize
+This 14th century work
+is divided into 3
+sections: "Inferno",
+"Purgatorio" &
+"Paradiso"         (y)
+End-to-End Backprop through q and pθ
+Barack Obama was
+born in Hawaii.(x)
+Fact Veriﬁcation: Fact Query
+supports (y)
+Question Generation
+Fact Veriﬁcation:
+Label Generation
+Document
+Index
+Define "middle ear"(x)
+Question Answering:
+Question Query
+The middle ear includes
+the tympanic cavity and
+the three ossicles.  (y)
+Question Answering:
+Answer Generation
+Retriever pη
+(Non-Parametric)
+z4
+z3
+z2
+z1
+d(z)
+Jeopardy Question
+Generation:
+Answer Query
+Figure 1: Overview of our approach. We combine a pre-trained retriever (Query Encoder + Document
+Index) with a pre-trained seq2seq model (Generator) and ﬁne-tune end-to-end. For query x, we use
+Maximum Inner Product Search (MIPS) to ﬁnd the top-K documents zi. For ﬁnal prediction y, we
+treat z as a latent variable and marginalize over seq2seq predictions given different documents.
+but have only explored open-domain extractive question answering. Here, we bring hybrid parametric
+and non-parametric memory to the “workhorse of NLP,” i.e. sequence-to-sequence (seq2seq) models.
+We endow pre-trained, parametric-memory generation models with a non-parametric memory through
+a general-purpose ﬁne-tuning approach which we refer to as retrieval-augmented generation (RAG).
+We build RAG models where the parametric memory is a pre-trained seq2seq transformer, and the
+non-parametric memory is a dense vector index of Wikipedia, accessed with a pre-trained neural
+retriever. We combine these components in a probabilistic model trained end-to-end (Fig. 1). The
+retriever (Dense Passage Retriever [26], henceforth DPR) provides latent documents conditioned on
+the input, and the seq2seq model (BART [32]) then conditions on these latent documents together with
+the input to generate the output. We marginalize the latent documents with a top-K approximation,
+either on a per-output basis (assuming the same document is responsible for all tokens) or a per-token
+basis (where different documents are responsible for different tokens). Like T5 [51] or BART, RAG
+can be ﬁne-tuned on any seq2seq task, whereby both the generator and retriever are jointly learned.
+There has been extensive previous work proposing architectures to enrich systems with non-parametric
+memory which are trained from scratch for speciﬁc tasks, e.g. memory networks [64, 55], stack-
+augmented net
+==========================================================================================
+QUESTION 39: What is the role of the generator in RAG?
+EXPECTED SOURCE: 2005.11401v4.txt
+EXPECTED PDF PAGES: [2]
+----------------------------------------------------------------------
+PDF PAGE 2
+The Divine
+Comedy (x)
+q
+Query
+Encoder
+q(x)
+MIPS
+pθ
+Generator pθ
+(Parametric)
+Margin-
+alize
+This 14th century work
+is divided into 3
+sections: "Inferno",
+"Purgatorio" &
+"Paradiso"         (y)
+End-to-End Backprop through q and pθ
+Barack Obama was
+born in Hawaii.(x)
+Fact Veriﬁcation: Fact Query
+supports (y)
+Question Generation
+Fact Veriﬁcation:
+Label Generation
+Document
+Index
+Define "middle ear"(x)
+Question Answering:
+Question Query
+The middle ear includes
+the tympanic cavity and
+the three ossicles.  (y)
+Question Answering:
+Answer Generation
+Retriever pη
+(Non-Parametric)
+z4
+z3
+z2
+z1
+d(z)
+Jeopardy Question
+Generation:
+Answer Query
+Figure 1: Overview of our approach. We combine a pre-trained retriever (Query Encoder + Document
+Index) with a pre-trained seq2seq model (Generator) and ﬁne-tune end-to-end. For query x, we use
+Maximum Inner Product Search (MIPS) to ﬁnd the top-K documents zi. For ﬁnal prediction y, we
+treat z as a latent variable and marginalize over seq2seq predictions given different documents.
+but have only explored open-domain extractive question answering. Here, we bring hybrid parametric
+and non-parametric memory to the “workhorse of NLP,” i.e. sequence-to-sequence (seq2seq) models.
+We endow pre-trained, parametric-memory generation models with a non-parametric memory through
+a general-purpose ﬁne-tuning approach which we refer to as retrieval-augmented generation (RAG).
+We build RAG models where the parametric memory is a pre-trained seq2seq transformer, and the
+non-parametric memory is a dense vector index of Wikipedia, accessed with a pre-trained neural
+retriever. We combine these components in a probabilistic model trained end-to-end (Fig. 1). The
+retriever (Dense Passage Retriever [26], henceforth DPR) provides latent documents conditioned on
+the input, and the seq2seq model (BART [32]) then conditions on these latent documents together with
+the input to generate the output. We marginalize the latent documents with a top-K approximation,
+either on a per-output basis (assuming the same document is responsible for all tokens) or a per-token
+basis (where different documents are responsible for different tokens). Like T5 [51] or BART, RAG
+can be ﬁne-tuned on any seq2seq task, whereby both the generator and retriever are jointly learned.
+There has been extensive previous work proposing architectures to enrich systems with non-parametric
+memory which are trained from scratch for speciﬁc tasks, e.g. memory networks [64, 55], stack-
+augmented net
+==========================================================================================
+QUESTION 40: How does RAG use a non-parametric document index?
+EXPECTED SOURCE: 2005.11401v4.txt
+EXPECTED PDF PAGES: [1, 2]
+----------------------------------------------------------------------
+PDF PAGE 1
+Retrieval-Augmented Generation for
+Knowledge-Intensive NLP Tasks
+Patrick Lewis†‡, Ethan Perez⋆,
+Aleksandra Piktus†, Fabio Petroni†, Vladimir Karpukhin†, Naman Goyal†, Heinrich Küttler†,
+Mike Lewis†, Wen-tau Yih†, Tim Rocktäschel†‡, Sebastian Riedel†‡, Douwe Kiela†
+†Facebook AI Research; ‡University College London; ⋆New York University;
+plewis@fb.com
+Abstract
+Large pre-trained language models have been shown to store factual knowledge
+in their parameters, and achieve state-of-the-art results when ﬁne-tuned on down-
+stream NLP tasks. However, their ability to access and precisely manipulate knowl-
+edge is still limited, and hence on knowledge-intensive tasks, their performance
+lags behind task-speciﬁc architectures. Additionally, providing provenance for their
+decisions and updating their world knowledge remain open research problems. Pre-
+trained models with a differentiable access mechanism to explicit non-parametric
+memory have so far been only investigated for extractive downstream tasks. We
+explore a general-purpose ﬁne-tuning recipe for retrieval-augmented generation
+(RAG) — models which combine pre-trained parametric and non-parametric mem-
+ory for language generation. We introduce RAG models where the parametric
+memory is a pre-trained seq2seq model and the non-parametric memory is a dense
+vector index of Wikipedia, accessed with a pre-trained neural retriever. We com-
+pare two RAG formulations, one which conditions on the same retrieved passages
+across the whole generated sequence, and another which can use different passages
+per token. We ﬁne-tune and evaluate our models on a wide range of knowledge-
+intensive NLP tasks and set the state of the art on three open domain QA tasks,
+outperforming parametric seq2seq models and task-speciﬁc retrieve-and-extract
+architectures. For language generation tasks, we ﬁnd that RAG models generate
+more speciﬁc, diverse and factual language than a state-of-the-art parametric-only
+seq2seq baseline.
+1
+Introduction
+Pre-trained neural language models have been shown to learn a substantial amount of in-depth knowl-
+edge from data [47]. They can do so without any access to an external memory, as a parameterized
+implicit knowledge base [51, 52]. While this development is exciting, such models do have down-
+sides: They cannot easily expand or revise their memory, can’t straightforwardly provide insight into
+their predictions, and may produce “hallucinations” [38]. Hybrid models that combine parametric
+memory with non-param
+----------------------------------------------------------------------
+PDF PAGE 2
+The Divine
+Comedy (x)
+q
+Query
+Encoder
+q(x)
+MIPS
+pθ
+Generator pθ
+(Parametric)
+Margin-
+alize
+This 14th century work
+is divided into 3
+sections: "Inferno",
+"Purgatorio" &
+"Paradiso"         (y)
+End-to-End Backprop through q and pθ
+Barack Obama was
+born in Hawaii.(x)
+Fact Veriﬁcation: Fact Query
+supports (y)
+Question Generation
+Fact Veriﬁcation:
+Label Generation
+Document
+Index
+Define "middle ear"(x)
+Question Answering:
+Question Query
+The middle ear includes
+the tympanic cavity and
+the three ossicles.  (y)
+Question Answering:
+Answer Generation
+Retriever pη
+(Non-Parametric)
+z4
+z3
+z2
+z1
+d(z)
+Jeopardy Question
+Generation:
+Answer Query
+Figure 1: Overview of our approach. We combine a pre-trained retriever (Query Encoder + Document
+Index) with a pre-trained seq2seq model (Generator) and ﬁne-tune end-to-end. For query x, we use
+Maximum Inner Product Search (MIPS) to ﬁnd the top-K documents zi. For ﬁnal prediction y, we
+treat z as a latent variable and marginalize over seq2seq predictions given different documents.
+but have only explored open-domain extractive question answering. Here, we bring hybrid parametric
+and non-parametric memory to the “workhorse of NLP,” i.e. sequence-to-sequence (seq2seq) models.
+We endow pre-trained, parametric-memory generation models with a non-parametric memory through
+a general-purpose ﬁne-tuning approach which we refer to as retrieval-augmented generation (RAG).
+We build RAG models where the parametric memory is a pre-trained seq2seq transformer, and the
+non-parametric memory is a dense vector index of Wikipedia, accessed with a pre-trained neural
+retriever. We combine these components in a probabilistic model trained end-to-end (Fig. 1). The
+retriever (Dense Passage Retriever [26], henceforth DPR) provides latent documents conditioned on
+the input, and the seq2seq model (BART [32]) then conditions on these latent documents together with
+the input to generate the output. We marginalize the latent documents with a top-K approximation,
+either on a per-output basis (assuming the same document is responsible for all tokens) or a per-token
+basis (where different documents are responsible for different tokens). Like T5 [51] or BART, RAG
+can be ﬁne-tuned on any seq2seq task, whereby both the generator and retriever are jointly learned.
+There has been extensive previous work proposing architectures to enrich systems with non-parametric
+memory which are trained from scratch for speciﬁc tasks, e.g. memory networks [64, 55], stack-
+augmented net
+==========================================================================================
+QUESTION 41: What is the difference between RAG-Sequence and RAG-Token?
+EXPECTED SOURCE: 2005.11401v4.txt
+EXPECTED PDF PAGES: [3]
+----------------------------------------------------------------------
+PDF PAGE 3
+by θ that generates a current token based on a context of the previous i −1 tokens y1:i−1, the original
+input x and a retrieved passage z.
+To train the retriever and generator end-to-end, we treat the retrieved document as a latent variable.
+We propose two models that marginalize over the latent documents in different ways to produce a
+distribution over generated text. In one approach, RAG-Sequence, the model uses the same document
+to predict each target token. The second approach, RAG-Token, can predict each target token based
+on a different document. In the following, we formally introduce both models and then describe the
+pη and pθ components, as well as the training and decoding procedure.
+2.1
+Models
+RAG-Sequence Model
+The RAG-Sequence model uses the same retrieved document to generate
+the complete sequence. Technically, it treats the retrieved document as a single latent variable that
+is marginalized to get the seq2seq probability p(y|x) via a top-K approximation. Concretely, the
+top K documents are retrieved using the retriever, and the generator produces the output sequence
+probability for each document, which are then marginalized,
+pRAG-Sequence(y|x) ≈
+X
+z∈top-k(p(·|x))
+pη(z|x)pθ(y|x, z) =
+X
+z∈top-k(p(·|x))
+pη(z|x)
+N
+Y
+i
+pθ(yi|x, z, y1:i−1)
+RAG-Token Model
+In the RAG-Token model we can draw a different latent document for each
+target token and marginalize accordingly. This allows the generator to choose content from several
+documents when producing an answer. Concretely, the top K documents are retrieved using the
+retriever, and then the generator produces a distribution for the next output token for each document,
+before marginalizing, and repeating the process with the following output token, Formally, we deﬁne:
+pRAG-Token(y|x) ≈
+N
+Y
+i
+X
+z∈top-k(p(·|x))
+pη(z|x)pθ(yi|x, z, y1:i−1)
+Finally, we note that RAG can be used for sequence classiﬁcation tasks by considering the target class
+as a target sequence of length one, in which case RAG-Sequence and RAG-Token are equivalent.
+2.2
+Retriever: DPR
+The retrieval component pη(z|x) is based on DPR [26]. DPR follows a bi-encoder architecture:
+pη(z|x) ∝exp
+ d(z)⊤q(x)
+
+d(z) = BERTd(z), q(x) = BERTq(x)
+where d(z) is a dense representation of a document produced by a BERTBASE document encoder [8],
+and q(x) a query representation produced by a query encoder, also based on BERTBASE. Calculating
+top-k(pη(·|x)), the list of k documents z with highest prior probability pη(z|x), is a Maximum Inner
+Product Search (MI
+==========================================================================================
+QUESTION 42: How does RAG combine evidence from multiple retrieved documents?
+EXPECTED SOURCE: 2005.11401v4.txt
+EXPECTED PDF PAGES: [3]
+----------------------------------------------------------------------
+PDF PAGE 3
+by θ that generates a current token based on a context of the previous i −1 tokens y1:i−1, the original
+input x and a retrieved passage z.
+To train the retriever and generator end-to-end, we treat the retrieved document as a latent variable.
+We propose two models that marginalize over the latent documents in different ways to produce a
+distribution over generated text. In one approach, RAG-Sequence, the model uses the same document
+to predict each target token. The second approach, RAG-Token, can predict each target token based
+on a different document. In the following, we formally introduce both models and then describe the
+pη and pθ components, as well as the training and decoding procedure.
+2.1
+Models
+RAG-Sequence Model
+The RAG-Sequence model uses the same retrieved document to generate
+the complete sequence. Technically, it treats the retrieved document as a single latent variable that
+is marginalized to get the seq2seq probability p(y|x) via a top-K approximation. Concretely, the
+top K documents are retrieved using the retriever, and the generator produces the output sequence
+probability for each document, which are then marginalized,
+pRAG-Sequence(y|x) ≈
+X
+z∈top-k(p(·|x))
+pη(z|x)pθ(y|x, z) =
+X
+z∈top-k(p(·|x))
+pη(z|x)
+N
+Y
+i
+pθ(yi|x, z, y1:i−1)
+RAG-Token Model
+In the RAG-Token model we can draw a different latent document for each
+target token and marginalize accordingly. This allows the generator to choose content from several
+documents when producing an answer. Concretely, the top K documents are retrieved using the
+retriever, and then the generator produces a distribution for the next output token for each document,
+before marginalizing, and repeating the process with the following output token, Formally, we deﬁne:
+pRAG-Token(y|x) ≈
+N
+Y
+i
+X
+z∈top-k(p(·|x))
+pη(z|x)pθ(yi|x, z, y1:i−1)
+Finally, we note that RAG can be used for sequence classiﬁcation tasks by considering the target class
+as a target sequence of length one, in which case RAG-Sequence and RAG-Token are equivalent.
+2.2
+Retriever: DPR
+The retrieval component pη(z|x) is based on DPR [26]. DPR follows a bi-encoder architecture:
+pη(z|x) ∝exp
+ d(z)⊤q(x)
+
+d(z) = BERTd(z), q(x) = BERTq(x)
+where d(z) is a dense representation of a document produced by a BERTBASE document encoder [8],
+and q(x) a query representation produced by a query encoder, also based on BERTBASE. Calculating
+top-k(pη(·|x)), the list of k documents z with highest prior probability pη(z|x), is a Maximum Inner
+Product Search (MI
+==========================================================================================
+QUESTION 43: What limitations of pre-trained language models motivate retrieval-augmented generation?
+EXPECTED SOURCE: 2005.11401v4.txt
+EXPECTED PDF PAGES: [1]
+----------------------------------------------------------------------
+PDF PAGE 1
+Retrieval-Augmented Generation for
+Knowledge-Intensive NLP Tasks
+Patrick Lewis†‡, Ethan Perez⋆,
+Aleksandra Piktus†, Fabio Petroni†, Vladimir Karpukhin†, Naman Goyal†, Heinrich Küttler†,
+Mike Lewis†, Wen-tau Yih†, Tim Rocktäschel†‡, Sebastian Riedel†‡, Douwe Kiela†
+†Facebook AI Research; ‡University College London; ⋆New York University;
+plewis@fb.com
+Abstract
+Large pre-trained language models have been shown to store factual knowledge
+in their parameters, and achieve state-of-the-art results when ﬁne-tuned on down-
+stream NLP tasks. However, their ability to access and precisely manipulate knowl-
+edge is still limited, and hence on knowledge-intensive tasks, their performance
+lags behind task-speciﬁc architectures. Additionally, providing provenance for their
+decisions and updating their world knowledge remain open research problems. Pre-
+trained models with a differentiable access mechanism to explicit non-parametric
+memory have so far been only investigated for extractive downstream tasks. We
+explore a general-purpose ﬁne-tuning recipe for retrieval-augmented generation
+(RAG) — models which combine pre-trained parametric and non-parametric mem-
+ory for language generation. We introduce RAG models where the parametric
+memory is a pre-trained seq2seq model and the non-parametric memory is a dense
+vector index of Wikipedia, accessed with a pre-trained neural retriever. We com-
+pare two RAG formulations, one which conditions on the same retrieved passages
+across the whole generated sequence, and another which can use different passages
+per token. We ﬁne-tune and evaluate our models on a wide range of knowledge-
+intensive NLP tasks and set the state of the art on three open domain QA tasks,
+outperforming parametric seq2seq models and task-speciﬁc retrieve-and-extract
+architectures. For language generation tasks, we ﬁnd that RAG models generate
+more speciﬁc, diverse and factual language than a state-of-the-art parametric-only
+seq2seq baseline.
+1
+Introduction
+Pre-trained neural language models have been shown to learn a substantial amount of in-depth knowl-
+edge from data [47]. They can do so without any access to an external memory, as a parameterized
+implicit knowledge base [51, 52]. While this development is exciting, such models do have down-
+sides: They cannot easily expand or revise their memory, can’t straightforwardly provide insight into
+their predictions, and may produce “hallucinations” [38]. Hybrid models that combine parametric
+memory with non-param
+==========================================================================================
+QUESTION 44: What tasks were used to evaluate the RAG models?
+EXPECTED SOURCE: 2005.11401v4.txt
+EXPECTED PDF PAGES: [4, 5]
+----------------------------------------------------------------------
+PDF PAGE 4
+minimize the negative marginal log-likelihood of each target, P
+j −log p(yj|xj) using stochastic
+gradient descent with Adam [28]. Updating the document encoder BERTd during training is costly as
+it requires the document index to be periodically updated as REALM does during pre-training [20].
+We do not ﬁnd this step necessary for strong performance, and keep the document encoder (and
+index) ﬁxed, only ﬁne-tuning the query encoder BERTq and the BART generator.
+2.5
+Decoding
+At test time, RAG-Sequence and RAG-Token require different ways to approximate arg maxy p(y|x).
+RAG-Token
+The RAG-Token model can be seen as a standard, autoregressive seq2seq genera-
+tor with transition probability: p′
+θ(yi|x, y1:i−1) = P
+z∈top-k(p(·|x)) pη(zi|x)pθ(yi|x, zi, y1:i−1) To
+decode, we can plug p′
+θ(yi|x, y1:i−1) into a standard beam decoder.
+RAG-Sequence
+For RAG-Sequence, the likelihood p(y|x) does not break into a conventional per-
+token likelihood, hence we cannot solve it with a single beam search. Instead, we run beam search for
+each document z, scoring each hypothesis using pθ(yi|x, z, y1:i−1). This yields a set of hypotheses
+Y , some of which may not have appeared in the beams of all documents. To estimate the probability
+of an hypothesis y we run an additional forward pass for each document z for which y does not
+appear in the beam, multiply generator probability with pη(z|x) and then sum the probabilities across
+beams for the marginals. We refer to this decoding procedure as “Thorough Decoding.” For longer
+output sequences, |Y | can become large, requiring many forward passes. For more efﬁcient decoding,
+we can make a further approximation that pθ(y|x, zi) ≈0 where y was not generated during beam
+search from x, zi. This avoids the need to run additional forward passes once the candidate set Y has
+been generated. We refer to this decoding procedure as “Fast Decoding.”
+3
+Experiments
+We experiment with RAG in a wide range of knowledge-intensive tasks. For all experiments, we use
+a single Wikipedia dump for our non-parametric knowledge source. Following Lee et al. [31] and
+Karpukhin et al. [26], we use the December 2018 dump. Each Wikipedia article is split into disjoint
+100-word chunks, to make a total of 21M documents. We use the document encoder to compute an
+embedding for each document, and build a single MIPS index using FAISS [23] with a Hierarchical
+Navigable Small World approximation for fast retrieval [37]. During training, we retrieve the top
+k documents for each
+----------------------------------------------------------------------
+PDF PAGE 5
+MSMARCO as an open-domain abstractive QA task. MSMARCO has some questions that cannot be
+answered in a way that matches the reference answer without access to the gold passages, such as
+“What is the weather in Volcano, CA?” so performance will be lower without using gold passages.
+We also note that some MSMARCO questions cannot be answered using Wikipedia alone. Here,
+RAG can rely on parametric knowledge to generate reasonable responses.
+3.3
+Jeopardy Question Generation
+To evaluate RAG’s generation abilities in a non-QA setting, we study open-domain question gen-
+eration. Rather than use questions from standard open-domain QA tasks, which typically consist
+of short, simple questions, we propose the more demanding task of generating Jeopardy questions.
+Jeopardy is an unusual format that consists of trying to guess an entity from a fact about that entity.
+For example, “The World Cup” is the answer to the question “In 1986 Mexico scored as the ﬁrst
+country to host this international sports competition twice.” As Jeopardy questions are precise,
+factual statements, generating Jeopardy questions conditioned on their answer entities constitutes a
+challenging knowledge-intensive generation task.
+We use the splits from SearchQA [10], with 100K train, 14K dev, and 27K test examples. As
+this is a new task, we train a BART model for comparison. Following [67], we evaluate using the
+SQuAD-tuned Q-BLEU-1 metric [42]. Q-BLEU is a variant of BLEU with a higher weight for
+matching entities and has higher correlation with human judgment for question generation than
+standard metrics. We also perform two human evaluations, one to assess generation factuality, and
+one for speciﬁcity. We deﬁne factuality as whether a statement can be corroborated by trusted external
+sources, and speciﬁcity as high mutual dependence between the input and output [33]. We follow
+best practice and use pairwise comparative evaluation [34]. Evaluators are shown an answer and two
+generated questions, one from BART and one from RAG. They are then asked to pick one of four
+options—quuestion A is better, question B is better, both are good, or neither is good.
+3.4
+Fact Veriﬁcation
+FEVER [56] requires classifying whether a natural language claim is supported or refuted by
+Wikipedia, or whether there is not enough information to decide. The task requires retrieving
+evidence from Wikipedia relating to the claim and then reasoning over this evidence to classify
+whether the claim is true, false, or unveriﬁabl
+==========================================================================================
+QUESTION 45: What benefits did the RAG paper report for knowledge-intensive generation?
+EXPECTED SOURCE: 2005.11401v4.txt
+EXPECTED PDF PAGES: [1]
+----------------------------------------------------------------------
+PDF PAGE 1
+Retrieval-Augmented Generation for
+Knowledge-Intensive NLP Tasks
+Patrick Lewis†‡, Ethan Perez⋆,
+Aleksandra Piktus†, Fabio Petroni†, Vladimir Karpukhin†, Naman Goyal†, Heinrich Küttler†,
+Mike Lewis†, Wen-tau Yih†, Tim Rocktäschel†‡, Sebastian Riedel†‡, Douwe Kiela†
+†Facebook AI Research; ‡University College London; ⋆New York University;
+plewis@fb.com
+Abstract
+Large pre-trained language models have been shown to store factual knowledge
+in their parameters, and achieve state-of-the-art results when ﬁne-tuned on down-
+stream NLP tasks. However, their ability to access and precisely manipulate knowl-
+edge is still limited, and hence on knowledge-intensive tasks, their performance
+lags behind task-speciﬁc architectures. Additionally, providing provenance for their
+decisions and updating their world knowledge remain open research problems. Pre-
+trained models with a differentiable access mechanism to explicit non-parametric
+memory have so far been only investigated for extractive downstream tasks. We
+explore a general-purpose ﬁne-tuning recipe for retrieval-augmented generation
+(RAG) — models which combine pre-trained parametric and non-parametric mem-
+ory for language generation. We introduce RAG models where the parametric
+memory is a pre-trained seq2seq model and the non-parametric memory is a dense
+vector index of Wikipedia, accessed with a pre-trained neural retriever. We com-
+pare two RAG formulations, one which conditions on the same retrieved passages
+across the whole generated sequence, and another which can use different passages
+per token. We ﬁne-tune and evaluate our models on a wide range of knowledge-
+intensive NLP tasks and set the state of the art on three open domain QA tasks,
+outperforming parametric seq2seq models and task-speciﬁc retrieve-and-extract
+architectures. For language generation tasks, we ﬁnd that RAG models generate
+more speciﬁc, diverse and factual language than a state-of-the-art parametric-only
+seq2seq baseline.
+1
+Introduction
+Pre-trained neural language models have been shown to learn a substantial amount of in-depth knowl-
+edge from data [47]. They can do so without any access to an external memory, as a parameterized
+implicit knowledge base [51, 52]. While this development is exciting, such models do have down-
+sides: They cannot easily expand or revise their memory, can’t straightforwardly provide insight into
+their predictions, and may produce “hallucinations” [38]. Hybrid models that combine parametric
+memory with non-param

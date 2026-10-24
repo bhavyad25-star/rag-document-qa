@@ -1,0 +1,23 @@
+[
+  {
+    "filename": "1706.03762v7.pdf",
+    "total_pages": 15,
+    "total_characters": 39483,
+    "average_characters_per_page": 2632.2,
+    "low_text_pages": []
+  },
+  {
+    "filename": "2005.11401v4.pdf",
+    "total_pages": 19,
+    "total_characters": 69059,
+    "average_characters_per_page": 3634.68,
+    "low_text_pages": []
+  },
+  {
+    "filename": "2020.emnlp-main.550.pdf",
+    "total_pages": 13,
+    "total_characters": 56183,
+    "average_characters_per_page": 4321.77,
+    "low_text_pages": []
+  }
+]

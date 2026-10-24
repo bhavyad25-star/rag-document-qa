@@ -1,0 +1,28 @@
+{"question":"How does Dense Passage Retrieval represent and retrieve passages?","relevant_source":"2020.emnlp-main.550.txt","relevant_pages":[2]}
+
+{"question":"What is retrieval-augmented generation, and why is it useful?","relevant_source":"2005.11401v4.txt","relevant_pages":[9]}
+
+{"question":"What problem does the Transformer architecture aim to solve?","relevant_source":"1706.03762v7.txt","relevant_pages":[1]}
+
+{"question":"Why does the Transformer use attention instead of relying entirely on recurrence or convolution?","relevant_source":"1706.03762v7.txt","relevant_pages":[2]}
+
+{"question":"What are the roles of the query encoder and passage encoder in Dense Passage Retrieval?","relevant_source":"2020.emnlp-main.550.txt","relevant_pages":[2]}
+
+{"question":"How is a passage represented as a dense vector in Dense Passage Retrieval?","relevant_source":"2020.emnlp-main.550.txt","relevant_pages":[2]}
+
+{"question":"How does the attention mechanism help a model process relationships between words?","relevant_source":"1706.03762v7.txt","relevant_pages":[2,3]}
+{"question":"What is self-attention in the Transformer architecture?","relevant_source":"1706.03762v7.txt","relevant_pages":[3]}
+
+{"question":"What is the purpose of positional encoding in the Transformer?","relevant_source":"1706.03762v7.txt","relevant_pages":[6]}
+
+{"question":"How does retrieval-augmented generation combine a retriever and a generator?","relevant_source":"2005.11401v4.txt","relevant_pages":[2]}
+
+{"question":"What is the difference between a parametric memory and a non-parametric memory in retrieval-augmented generation?","relevant_source":"2005.11401v4.txt","relevant_pages":[2]}
+
+{"question":"How can retrieved passages help a language model answer knowledge-intensive questions?","relevant_source":"2005.11401v4.txt","relevant_pages":[1,4]}
+
+{"question":"How does Dense Passage Retrieval differ from traditional sparse retrieval methods?","relevant_source":"2020.emnlp-main.550.txt","relevant_pages":[1]}
+
+{"question":"What is the purpose of multi-head attention?","relevant_source":"1706.03762v7.txt","relevant_pages":[5]}
+
+{"question":"Why can dense retrieval be useful when a question uses different words from the relevant passage?","relevant_source":"2020.emnlp-main.550.txt","relevant_pages":[1]}

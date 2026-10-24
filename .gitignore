@@ -1,0 +1,23 @@
+
+# Python environments
+.venv/
+.venv-1/
+venv/
+__pycache__/
+*.py[cod]
+
+# Secrets
+.env
+.env.*
+!.env.example
+.streamlit/secrets.toml
+
+# User uploads and private chat data
+data/uploads/
+data/chat_sessions/
+data/chat_history.json
+
+# Editor and notebook files
+.vscode/
+.ipynb_checkpoints/
+.DS_Store
